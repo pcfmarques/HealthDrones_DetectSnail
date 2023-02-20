@@ -1,0 +1,1752 @@
+external prioritise
+transparent wbisim
+OneStep(_) = 0
+
+--------------------------------------------------------------------------------
+-- Basic property of mod0 ------------------------------------------------------
+--------------------------------------------------------------------------------
+TakeInputsSpec =
+  (registerRead.imod0_ev1?b -> SKIP ||| registerRead.imod0_ev3?b -> SKIP)
+  
+CollectOutputsSpec(n) =
+  if n > 0
+  then (registerWrite?x -> CollectOutputsSpec(n-1) [] tock -> SKIP)
+  else tock -> SKIP
+
+Spec = TakeInputsSpec; CollectOutputsSpec(4); Spec
+
+assert Spec [T= mod0
+
+--------------------------------------------------------------------------------
+-- Basic types needed for the example. In RoboTool, this would be in an 
+-- assertions file. 
+--------------------------------------------------------------------------------
+
+nametype nat = {0..3}
+int = {0..3}
+
+--------------------------------------------------------------------------------
+-- RegisterDataInput and RegisterDataOutput are optimised accounts of a general 
+-- data types that can be 
+-- used to give a model-independent type to the register channels.
+--
+-- RegisterDataInput = simpleI ID.Bool | argsI ID.Bool.Arg 
+-- RegisterDataOutput = simpleO ID | argsO ID.Arg
+-- Arg = Seq Value
+--
+-- The simpleI and simpleO constructors are for events that do not communicate 
+-- values; simpleO is also for operations without arguments. We use argsI and argsO for 
+-- variables, for events that communicate values, and for operations with argument(s).
+-- 
+-- The optimisation is a model-specific type that includes a constructor for 
+-- each variable, event, or operation in the model, with the unique identifier
+-- that it has in the component (platform, controller, or machine) where it is
+-- declared. 
+--------------------------------------------------------------------------------
+
+datatype RegisterDataInput =
+    imod0_ev1.Bool
+  | imod0_ev3.Bool
+  
+  | imod0_ctrl0_x.nat
+  | imod0_ctrl0_ev3.Bool
+  
+  | imod0_ctrl1_x.nat
+  | imod0_ctrl1_ev1.Bool
+  | imod0_ctrl1_ev2.Bool
+
+-- For the state machines, the unique names should include a currently hidden 
+-- identifier for the references. Here, we make a simplification and assume that
+-- the machines are copied inside the controller. In general, if a machine is
+-- used more than once in a controller or in different controllers, this is not 
+-- very efficient because it requires calculation of its semantics twice. 
+
+  | imod0_ctrl0_stm0_x.nat
+  | imod0_ctrl0_stm0_z.nat
+
+  | imod0_ctrl0_stm1_x.nat
+  | imod0_ctrl0_stm1_z.nat
+  | imod0_ctrl0_stm1_ev5.Bool
+  
+  | imod0_ctrl1_stm2_x.nat
+  | imod0_ctrl1_stm2_ev1.Bool
+  | imod0_ctrl1_stm2_ev2.Bool
+
+datatype RegisterDataOutput =
+  omod0_x.nat
+  | omod0_op1.nat
+  | omod0_op2
+  | omod0_ev0
+  
+  | omod0_ctrl0_x.nat
+  | omod0_ctrl0_op1.nat
+  | omod0_ctrl0_op2
+  | omod0_ctrl0_ev0
+  | omod0_ctrl0_ev2
+  
+  | omod0_ctrl1_x.nat
+  | omod0_ctrl1_op1.nat
+
+-- For the state machines, the unique names should include a currently hidden 
+-- identifier for the references. Here, we make a simplification and assume that
+-- the machines are copied inside the controller. In general, if a machine is
+-- used more than once in a controller or in different controllers, this is not 
+-- very efficient because it requires calculation of its semantics twice. 
+
+  | omod0_ctrl0_stm0_x.nat
+  | omod0_ctrl0_stm0_op1.nat
+  | omod0_ctrl0_stm0_op2
+  | omod0_ctrl0_stm0_ev0
+  | omod0_ctrl0_stm0_z.nat
+
+  | omod0_ctrl0_stm1_x.nat
+  | omod0_ctrl0_stm1_z.nat
+  | omod0_ctrl0_stm1_ev2
+  
+  | omod0_ctrl1_stm2_x.nat
+  | omod0_ctrl1_stm2_op1.nat
+
+datatype RegisterDataEvars = 
+  omod0_ev2
+      
+channel registerRead, registerReadC: RegisterDataInput
+channel registerWrite, registerWriteC: RegisterDataOutput
+channel registerWriteE: RegisterDataEvars
+
+channel set_mod0_c,
+        set_mod0_ctrl0_c,set_mod0_ctrl1_c,
+        set_mod0_ctrl0_stm0_c,set_mod0_ctrl0_stm1_c,set_mod0_ctrl1_stm2_c: nat
+
+channel tock, end
+
+channel startexec
+
+wait(n) = if (n == 0) then SKIP else tock -> wait(n-1)
+
+--------------------
+-- Module process --
+--------------------
+
+-- Note that in the description below, we are using names of metamodel elements
+-- to identify it. In reality, these sets include the metamodel elements themselves.
+
+-- inputs = {(mod0_ev3,mod0_ctrl0_ev3),(mod0_ev1,mod0_ctrl1_ev1)}
+-- evars = {(mod0_ctrl0_ev2,mod0_ctrl1_ev2)}
+-- rvars = {(mod0_x,mod0_ctrl0_x),(mod0_x,mod0_ctrl1_x)} -- pvars?
+-- The set rvars captures information on variables required by the controllers,
+-- not by the module, as there is no such thing as a variable required by the module. 
+-- outputs = {(mod0_op1,mod0_ctrl0_op1),(mod0_op1,mod0_ctrl1_op1),
+--            (mod0_op2,mod0_ctrl0_op2), 
+--            (mod0_ev0,mod0_ctrl0_ev0),
+-- plus the rvars 
+--            (mod0_x,mod0_ctrl0_x),(mod0_x,mod0_ctrl1_x)}  
+
+mod0_ = wbisim(mod0)          
+
+mod0 = prioritise(
+        ((((CycleModule_mod0 
+              [| {| registerWriteC.omod0_ctrl0_x,registerWriteC.omod0_ctrl1_x,registerWriteE |} |] 
+            MemoryComp_mod0)
+             [| {| set_mod0_c,registerReadC,registerWriteC,tock,mod0_ctrl0_endexec,mod0_ctrl1_endexec |} |]
+           ComposeControllers_mod0)
+          \ {| set_mod0_c,registerReadC,registerWriteC,mod0_ctrl0_endexec,mod0_ctrl1_endexec,mod0_endexec, registerWriteE |}) [| {end} |> SKIP) \ {end}
+        ,<{},{tock}>)
+
+assert mod0 :[deadlock free[F]]
+assert mod0 :[deterministic[F]]
+assert mod0 :[divergence free]
+
+--------------------------
+-- Cycle for the module --
+--------------------------
+mod0_cycle = 1
+channel mod0_endexec
+
+CycleModule_mod0 = 
+  TakeInputs_mod0; 
+  registerWriteE.omod0_ev2 -> SKIP;
+  (CollectOutputs_mod0(COutputEventsOp_mod0) [| {mod0_endexec} |] Monitor_mod0);
+  wait(mod0_cycle);
+  CycleModule_mod0
+
+-- assert CycleModule_mod0 :[deadlock free[F]]
+-- assert CycleModule_mod0 :[deterministic[F]]
+-- assert CycleModule_mod0 :[divergence free]
+
+TakeInputs_mod0 =
+  registerRead.imod0_ev3?mod0_ev3n -> registerReadC.imod0_ctrl0_ev3.mod0_ev3n -> SKIP
+  |||
+  registerRead.imod0_ev1?mod0_ev1n -> registerReadC.imod0_ctrl1_ev1.mod0_ev1n -> SKIP
+
+CollectOutputs_mod0(sout) = 
+  registerWriteC?outp:{ outp | out <- sout, outp <- OutputEventsOp_mod0,project_mod0(outp) == out} ->
+    registerWrite!(lift_mod0(outp)) -> 
+      CollectOutputs_mod0(diff(sout,{project_mod0(outp)}))
+  []
+  mod0_endexec -> SKIP
+
+-- Projection of the data type of outputs that identifies the outputs 
+-- available without the values that can be output. 
+datatype COutputEventsOp_mod0 = 
+  Cmod0_x
+  | Cmod0_op1
+  | Cmod0_op2
+  | Cmod0_ev0
+  
+project_mod0(omod0_ctrl0_x.n) = Cmod0_x
+project_mod0(omod0_ctrl1_x.n) = Cmod0_x
+project_mod0(omod0_ctrl0_op1.n) = Cmod0_op1
+project_mod0(omod0_ctrl1_op1.n) = Cmod0_op1
+project_mod0(omod0_ctrl0_op2) = Cmod0_op2
+project_mod0(omod0_ctrl0_ev0) = Cmod0_ev0
+
+nametype OutputEventsOp_mod0 = {|
+  omod0_ctrl0_x, omod0_ctrl1_x,
+  omod0_ctrl0_op1, omod0_ctrl1_op1,
+  omod0_ctrl0_op2,
+  omod0_ctrl0_ev0 |}
+  
+lift_mod0(omod0_ctrl0_x.n) = omod0_x.n
+lift_mod0(omod0_ctrl1_x.n) = omod0_x.n
+lift_mod0(omod0_ctrl0_op1.n) = omod0_op1.n
+lift_mod0(omod0_ctrl1_op1.n) = omod0_op1.n
+lift_mod0(omod0_ctrl0_op2) = omod0_op2
+lift_mod0(omod0_ctrl0_ev0) = omod0_ev0
+
+Monitor_mod0 =
+  (mod0_ctrl0_endexec -> SKIP ||| mod0_ctrl1_endexec -> SKIP); mod0_endexec -> SKIP
+
+-- assert CycleModule_mod0 :[deadlock free[F]]
+-- assert CycleModule_mod0 :[deterministic[F]]
+-- assert CycleModule_mod0 :[divergence free]
+
+---------------------------
+-- Memory for the module --
+---------------------------
+-- It degenerates to STOP when there are no variables. Does it need to be SKIP?
+-- This is something that should be tested using the code generated from 
+-- RoboTool.
+MemoryComp_mod0 = 
+  let Memory(mod0_xn,mod0_ev2n) = 
+        -- Read
+        registerReadC.imod0_ctrl0_x.mod0_xn -> Memory(mod0_xn,mod0_ev2n)
+        []
+        registerReadC.imod0_ctrl1_x.mod0_xn -> Memory(mod0_xn,mod0_ev2n)
+        []
+        registerReadC.imod0_ctrl1_ev2.mod0_ev2n -> Memory(mod0_xn,mod0_ev2n)
+        []
+        -- Write
+        registerWriteC.omod0_ctrl0_x?mod0_xn -> Memory(mod0_xn,mod0_ev2n)
+        []
+        registerWriteC.omod0_ctrl1_x?mod0_xn -> Memory(mod0_xn,mod0_ev2n)
+        []
+        registerWriteE.omod0_ev2 -> Memory(mod0_xn,false)
+        []
+        registerWriteC.omod0_ctrl0_ev2 -> Memory(mod0_xn,true)
+
+        
+  within set_mod0_c.1 -> SKIP; Memory(0,false)
+  
+-- assert MemoryComp_mod0 :[deadlock free[F]]
+-- assert MemoryComp_mod0 :[deterministic[F]]
+-- assert MemoryComp_mod0 :[divergence free]
+
+-----------------------------------
+-- Behaviour for the controllers --
+-----------------------------------
+--mscf
+-- the event registerRead is replaced by the event registerReadC
+ComposeControllers_mod0 = 
+  mod0_ctrl0[[registerRead.d1 <- registerReadC.d1,registerWrite.d2 <- registerWriteC.d2 | d1 <- RegisterDataInput,
+                                                                                          d2 <- RegisterDataOutput]]
+            [[set_mod0_ctrl0_c <- set_mod0_c]]
+    [| {| tock, end, set_mod0_c |} |]
+  mod0_ctrl1[[registerRead.d1 <- registerReadC.d1,registerWrite.d2 <- registerWriteC.d2 | d1 <- RegisterDataInput,
+                                                                                          d2 <- RegisterDataOutput]]
+            [[set_mod0_ctrl1_c <- set_mod0_c]]
+
+-- assert ComposeControllers_mod0 :[deadlock free[F]]
+-- assert ComposeControllers_mod0 :[deterministic[F]]
+-- assert ComposeControllers_mod0 :[divergence free]
+
+-------------------------------
+-- Controller process: ctrl0 --
+-------------------------------
+
+-- Note that in the description below, we are using names of metamodel elements
+-- to identify it. In reality, these sets include the metamodel elements themselves.
+
+-- inputs = {(mod0_ctrl0_ev3,mod0_ctrl0_stm1_ev5),
+--           (mod0_ctrl0_x,mod0_ctrl0_stm0_x),
+--           (mod0_ctrl0_x,mod0_ctrl0_stm1_x) }
+-- evars = {}
+-- dvars = {(mod0_ctrl0_z,mod0_ctrl0_stm0_z),(mod0_ctrl0_z,mod0_ctrl0_stm1_z)}
+-- In dvars, we have the variables defined by the controller and required by at 
+-- least one machine. This is similar to the rvars variable used in the semantics 
+-- of the module. 
+-- outputs = {(mod0_ctrl0_op1,mod0_ctrl0_stm0_op1),
+--            (mod0_ctrl0_op2,mod0_ctrl0_stm0_op2), 
+--            (mod0_ctrl0_ev0,mod0_ctrl0_stm0_ev0), 
+--            (mod0_ctrl0_ev2,mod0_ctrl0_stm1_ev2),
+--            required variables used by at least one machine are inputs and outputs. 
+--            (mod0_ctrl0_x,mod0_ctrl0_stm0_x),(mod0_ctrl0_x,mod0_ctrl0_stm1_x),  
+--           } -- dvars are not included in outputs           
+mod0_ctrl0 = 
+  prioritise(
+    ((((CycleController_mod0_ctrl0 [| {| registerWriteC.omod0_ctrl0_stm0_z,registerWriteC.omod0_ctrl0_stm1_z|} |] MemoryComp_mod0_ctrl0)
+         [| {| set_mod0_ctrl0_c,registerReadC,registerWriteC,tock,mod0_ctrl0_stm0_endexec,mod0_ctrl0_stm1_endexec |} |]
+       ComposeMachines_mod0_ctrl0)
+       \ {| registerReadC,registerWriteC |}) [| {end} |> SKIP) \ {|end,mod0_ctrl0_stm0_endexec,mod0_ctrl0_stm1_endexec|}
+    , <{},{tock}>)	
+
+assert mod0_ctrl0 :[deadlock free[F]]
+assert mod0_ctrl0 :[deterministic[F]]
+assert mod0_ctrl0 :[divergence free]
+
+--------------------------------
+-- Cycle for controller ctrl0 --
+--------------------------------
+mod0_ctrl0_cycle = 1
+channel mod0_ctrl0_endexec
+
+CycleController_mod0_ctrl0 = 
+  TakeInputs_mod0_ctrl0; 
+  (CollectOutputs_mod0_ctrl0(COutputEventsOpDVars_mod0_ctrl0) 
+    [| {mod0_ctrl0_endexec} |] 
+   Monitor_mod0_ctrl0_endexec);
+  wait(mod0_ctrl0_cycle);
+  CycleController_mod0_ctrl0
+
+TakeInputs_mod0_ctrl0 =
+  registerRead.imod0_ctrl0_ev3?mod0_ctrl0_ev3n ->
+   registerReadC.imod0_ctrl0_stm1_ev5.mod0_ctrl0_ev3n -> SKIP
+  |||
+  registerRead.imod0_ctrl0_x?mod0_ctrl0_xn ->
+    (registerReadC.imod0_ctrl0_stm0_x.mod0_ctrl0_xn -> SKIP
+     |||
+     registerReadC.imod0_ctrl0_stm1_x.mod0_ctrl0_xn -> SKIP)
+
+CollectOutputs_mod0_ctrl0(sout) = 
+  registerWriteC?outp:{ outp | out <- sout, outp <- OutputEventsOp_mod0_ctrl0,project_mod0_ctrl0(outp) == out} ->
+   registerWrite!(lift_mod0_ctrl0(outp)) -> 
+     CollectOutputs_mod0_ctrl0(diff(sout,{project_mod0_ctrl0(outp)}))
+  []
+  registerWriteC?outp:{ outp | out <- sout, outp <- DVars_mod0_ctrl0,project_mod0_ctrl0(outp) == out} ->
+     CollectOutputs_mod0_ctrl0(diff(sout,{project_mod0_ctrl0(outp)}))
+  [] 
+  mod0_ctrl0_endexec -> SKIP
+
+-- Projection iof the data type of outputs that identifies the outputs 
+-- available without the values that can be output. 
+datatype COutputEventsOpDVars_mod0_ctrl0 = 
+  Cmod0_ctrl0_x
+  | Cmod0_ctrl0_op1
+  | Cmod0_ctrl0_op2
+  | Cmod0_ctrl0_ev0
+  | Cmod0_ctrl0_ev2
+  | Cmod0_ctrl0_z
+  
+project_mod0_ctrl0(omod0_ctrl0_stm0_x.n) = Cmod0_ctrl0_x
+project_mod0_ctrl0(omod0_ctrl0_stm1_x.n) = Cmod0_ctrl0_x
+project_mod0_ctrl0(omod0_ctrl0_stm0_op1.n) = Cmod0_ctrl0_op1
+project_mod0_ctrl0(omod0_ctrl0_stm0_op2) = Cmod0_ctrl0_op2
+project_mod0_ctrl0(omod0_ctrl0_stm0_ev0) = Cmod0_ctrl0_ev0
+project_mod0_ctrl0(omod0_ctrl0_stm1_ev2) = Cmod0_ctrl0_ev2
+project_mod0_ctrl0(omod0_ctrl0_stm0_z.n) = Cmod0_ctrl0_z
+project_mod0_ctrl0(omod0_ctrl0_stm1_z.n) = Cmod0_ctrl0_z
+
+nametype OutputEventsOp_mod0_ctrl0 = {|
+  omod0_ctrl0_stm0_x,omod0_ctrl0_stm1_x,
+  omod0_ctrl0_stm0_op1,
+  omod0_ctrl0_stm0_op2,
+  omod0_ctrl0_stm0_ev0 |}
+
+nametype DVars_mod0_ctrl0 = {| 
+  omod0_ctrl0_stm0_z,omod0_ctrl0_stm1_z |}
+
+lift_mod0_ctrl0(omod0_ctrl0_stm0_x.n) = omod0_ctrl0_x.n
+lift_mod0_ctrl0(omod0_ctrl0_stm1_x.n) = omod0_ctrl0_x.n
+lift_mod0_ctrl0(omod0_ctrl0_stm0_op1.n) = omod0_ctrl0_op1.n
+lift_mod0_ctrl0(omod0_ctrl0_stm0_op2) = omod0_ctrl0_op2
+lift_mod0_ctrl0(omod0_ctrl0_stm0_ev0) = omod0_ctrl0_ev0
+
+Monitor_mod0_ctrl0_endexec = 
+  (mod0_ctrl0_stm0_endexec?tid -> SKIP ||| mod0_ctrl0_stm1_endexec?tid -> SKIP);
+  mod0_ctrl0_endexec -> SKIP
+
+-- assert CycleController_mod0_ctrl0 :[deadlock free[F]]
+-- assert CycleController_mod0_ctrl0 :[deterministic[F]]
+-- assert CycleController_mod0_ctrl0 :[divergence free]
+
+---------------------------------
+-- Memory for controller ctrl0 --
+---------------------------------
+-- evars = {}
+-- dvars = {(mod0_ctrl0_z,mod0_ctrl0_stm0_z),(mod0_ctrl0_z,mod0_ctrl0_stm1_z)}  
+ MemoryComp_mod0_ctrl0 = 
+  let 
+    Memory(mod0_ctrl0_zn) =
+      registerReadC.imod0_ctrl0_stm0_z.mod0_ctrl0_zn -> Memory(mod0_ctrl0_zn) 
+      []
+      registerReadC.imod0_ctrl0_stm1_z.mod0_ctrl0_zn -> Memory(mod0_ctrl0_zn) 
+      []
+      registerWriteC.omod0_ctrl0_stm0_z?mod0_ctrl0_zn -> Memory(mod0_ctrl0_zn)
+      []
+      registerWriteC.omod0_ctrl0_stm1_z?mod0_ctrl0_zn -> Memory(mod0_ctrl0_zn)
+  within 
+    set_mod0_ctrl0_c?x -> SKIP; Memory(0)
+
+-- assert MemoryComp_mod0_ctrl0 :[deadlock free[F]]
+-- assert MemoryComp_mod0_ctrl0 :[deterministic[F]]
+-- assert MemoryComp_mod0_ctrl0 :[divergence free]
+
+------------------------------------
+-- Behaviour for controller ctrl0 --
+------------------------------------
+-- mscf
+-- the event registerWrite is replaced by the event registerWriteC
+ComposeMachines_mod0_ctrl0 =   
+  mod0_ctrl0_stm0[[registerRead.d1 <- registerReadC.d1,registerWrite.d2 <- registerWriteC.d2 | d1 <- RegisterDataInput,
+                                                                                               d2 <- RegisterDataOutput ]]
+                 [[set_mod0_ctrl0_stm0_c <- set_mod0_ctrl0_c]]
+    [| {| tock,end,set_mod0_ctrl0_c |} |]
+  mod0_ctrl0_stm1[[registerRead.d1 <- registerReadC.d1,registerWrite.d2 <- registerWriteC.d2 | d1 <- RegisterDataInput,
+                                                                                               d2 <- RegisterDataOutput ]]
+                 [[set_mod0_ctrl0_stm1_c <- set_mod0_ctrl0_c]]
+
+-- assert ComposeMachines_mod0_ctrl0 :[deadlock free[F]]
+-- assert ComposeMachines_mod0_ctrl0 :[deterministic[F]]
+-- assert ComposeMachines_mod0_ctrl0 :[divergence free]
+
+---------------------------
+-- Machine process: stm0 --
+---------------------------
+
+-- inputs = {mod0_ctrl0_stm0_x,mod0_ctrl0_stm0_z}
+-- outputs = {mod0_ctrl0_stm0_x,mod0_ctrl0_stm0_z,mod0_ctrl0_stm0_ev0,mod0_ctrl0_stm0_op1,mod0_ctrl0_stm0_op2}
+
+channel mod0_ctrl0_stm0_endexec : mod0_ctrl0_stm0_TIDSSim
+
+-- We're assuming here that there are no time primitives in the example. 
+-- Here, we're using an optimised version of both the memory and the buffer.
+mod0_ctrl0_stm0 =  
+  prioritise(
+  -- For optimisation, the Behaviour and Memory processes take the constant as
+  -- a parameter, instead of communicating.  This is not how it is formalised in
+  -- the semantic rules. 
+  set_mod0_ctrl0_stm0_c?mod0_ctrl0_stm0_c -> -- ????
+    (((Cycle_mod0_ctrl0_stm0
+	[| {|registerRead,mod0_ctrl0_stm0_endexec,tock|} |] 
+ 	(Memory_mod0_ctrl0_stm0(0,0,0,mod0_ctrl0_stm0_c) -- Order of memory parameters: x,z,w,c 
+    -- (MemoryN_mod0_ctrl0_stm0(mod0_ctrl0_stm0_c)
+   	[| union({|mod0_ctrl0_stm0_WC|},mod0_ctrl0_stm0_WCsync) |] 
+ 	Clocks_mod0_ctrl0_stm0) \ {| mod0_ctrl0_stm0_WC |})
+ 	[| union( {| get_mod0_ctrl0_stm0_x,set_mod0_ctrl0_stm0_x,
+                 get_mod0_ctrl0_stm0_z,set_mod0_ctrl0_stm0_z,
+                 get_mod0_ctrl0_stm0_w,set_mod0_ctrl0_stm0_w,
+                 get_mod0_ctrl0_stm0_c, 
+                 mod0_ctrl0_stm0_internalSim,
+                 mod0_ctrl0_stm0_clockReset, 
+                 startexec,
+                 mod0_ctrl0_stm0_endexec,registerWrite,
+                 end |}, mod0_ctrl0_stm0_WCsync) |]              
+    Behaviour_mod0_ctrl0_stm0) 
+	\ {| get_mod0_ctrl0_stm0_x,set_mod0_ctrl0_stm0_x,
+         get_mod0_ctrl0_stm0_z,set_mod0_ctrl0_stm0_z,
+         get_mod0_ctrl0_stm0_w,set_mod0_ctrl0_stm0_w,  
+         get_mod0_ctrl0_stm0_c,
+         mod0_ctrl0_stm0_clockReset,
+         mod0_ctrl0_stm0_internalSim, 
+         mod0_ctrl0_stm0_enteredSim,
+         startexec |}             
+ 	) [|{end}|> SKIP
+   , <{},{tock}>)			
+
+assert mod0_ctrl0_stm0 :[deadlock free[F]]
+assert mod0_ctrl0_stm0 :[deterministic[F]]
+assert mod0_ctrl0_stm0 :[divergence free]
+
+----------------------------
+-- Cycle for machine stm0 --
+----------------------------
+mod0_ctrl0_stm0_cycle = 1
+
+-- Projection of the data type of outputs that identifies the outputs 
+-- available without the values that can be output. 
+datatype COutputEventsOp_mod0_ctrl0_stm0 = 
+  Cmod0_ctrl0_stm0_x
+  | Cmod0_ctrl0_stm0_op1
+  | Cmod0_ctrl0_stm0_op2
+  | Cmod0_ctrl0_stm0_ev0
+  | Cmod0_ctrl0_stm0_z
+  
+TakeInputs_mod0_ctrl0_stm0 = 
+  registerRead.imod0_ctrl0_stm0_x?mod0_ctrl0_stm0_xn -> SKIP 
+  |||
+  registerRead.imod0_ctrl0_stm0_z?mod0_ctrl0_stm0_zn -> SKIP 
+
+Cycle_mod0_ctrl0_stm0 = 
+  TakeInputs_mod0_ctrl0_stm0; 
+  startexec ->  
+  CollectOutputs_mod0_ctrl0_stm0(COutputEventsOp_mod0_ctrl0_stm0);
+  (wait(mod0_ctrl0_stm0_cycle) [] end -> SKIP); 
+  Cycle_mod0_ctrl0_stm0
+
+project_mod0_ctrl0_stm0(omod0_ctrl0_stm0_x.n) = Cmod0_ctrl0_stm0_x
+project_mod0_ctrl0_stm0(omod0_ctrl0_stm0_op1.n) = Cmod0_ctrl0_stm0_op1
+project_mod0_ctrl0_stm0(omod0_ctrl0_stm0_op2) = Cmod0_ctrl0_stm0_op2
+project_mod0_ctrl0_stm0(omod0_ctrl0_stm0_ev0) = Cmod0_ctrl0_stm0_ev0
+project_mod0_ctrl0_stm0(omod0_ctrl0_stm0_z.n) = Cmod0_ctrl0_stm0_z
+
+nametype OutputEventsOp_mod0_ctrl0_stm0 = {|
+  omod0_ctrl0_stm0_x,
+  omod0_ctrl0_stm0_op1,
+  omod0_ctrl0_stm0_op2,
+  omod0_ctrl0_stm0_ev0,
+  omod0_ctrl0_stm0_z |}
+
+CollectOutputs_mod0_ctrl0_stm0(sout) = 
+  registerWrite?outp:{ outp | out <- sout, outp <- OutputEventsOp_mod0_ctrl0_stm0,project_mod0_ctrl0_stm0(outp) == out} -> 
+    CollectOutputs_mod0_ctrl0_stm0(diff(sout,{project_mod0_ctrl0_stm0(outp)}))
+  []
+  mod0_ctrl0_stm0_endexec?tid -> SKIP 
+
+-- assert Cycle_mod0_ctrl0_stm0 :[deadlock free[F]]
+-- assert Cycle_mod0_ctrl0_stm0 :[deterministic[F]]
+-- assert Cycle_mod0_ctrl0_stm0 :[divergence free]
+
+-----------------------------
+-- Memory for Machine stm0 --
+-----------------------------
+
+channel get_mod0_ctrl0_stm0_x, set_mod0_ctrl0_stm0_x: nat
+channel get_mod0_ctrl0_stm0_z, set_mod0_ctrl0_stm0_z: nat
+channel get_mod0_ctrl0_stm0_w, set_mod0_ctrl0_stm0_w: nat
+channel get_mod0_ctrl0_stm0_c: nat
+channel mod0_ctrl0_stm0_internalSim: mod0_ctrl0_stm0_TIDSSim
+
+Memory_mod0_ctrl0_stm0(mod0_ctrl0_stm0_xn,mod0_ctrl0_stm0_zn,mod0_ctrl0_stm0_wn,mod0_ctrl0_stm0_c) =    
+
+  get_mod0_ctrl0_stm0_x!mod0_ctrl0_stm0_xn ->
+    Memory_mod0_ctrl0_stm0(mod0_ctrl0_stm0_xn,mod0_ctrl0_stm0_zn,mod0_ctrl0_stm0_wn,mod0_ctrl0_stm0_c)
+  []
+  registerRead.imod0_ctrl0_stm0_x?mod0_ctrl0_stm0_xn -> 
+    Memory_mod0_ctrl0_stm0(mod0_ctrl0_stm0_xn,mod0_ctrl0_stm0_zn,mod0_ctrl0_stm0_wn,mod0_ctrl0_stm0_c)
+  []
+  set_mod0_ctrl0_stm0_x?mod0_ctrl0_stm0_xn -> 
+    Memory_mod0_ctrl0_stm0(mod0_ctrl0_stm0_xn,mod0_ctrl0_stm0_zn,mod0_ctrl0_stm0_wn,mod0_ctrl0_stm0_c)
+
+  []
+  
+  get_mod0_ctrl0_stm0_z!mod0_ctrl0_stm0_zn ->
+    Memory_mod0_ctrl0_stm0(mod0_ctrl0_stm0_xn,mod0_ctrl0_stm0_zn,mod0_ctrl0_stm0_wn,mod0_ctrl0_stm0_c)
+  []
+  registerRead.imod0_ctrl0_stm0_z?mod0_ctrl0_stm0_zn -> 
+    Memory_mod0_ctrl0_stm0(mod0_ctrl0_stm0_xn,mod0_ctrl0_stm0_zn,mod0_ctrl0_stm0_wn,mod0_ctrl0_stm0_c)
+  []
+  set_mod0_ctrl0_stm0_z?mod0_ctrl0_stm0_zn -> 
+    Memory_mod0_ctrl0_stm0(mod0_ctrl0_stm0_xn,mod0_ctrl0_stm0_zn,mod0_ctrl0_stm0_wn,mod0_ctrl0_stm0_c)
+  
+  []    
+   
+  get_mod0_ctrl0_stm0_w!mod0_ctrl0_stm0_wn ->
+    Memory_mod0_ctrl0_stm0(mod0_ctrl0_stm0_xn,mod0_ctrl0_stm0_zn,mod0_ctrl0_stm0_wn,mod0_ctrl0_stm0_c)
+  []
+  set_mod0_ctrl0_stm0_w?mod0_ctrl0_stm0_wn -> 
+    Memory_mod0_ctrl0_stm0(mod0_ctrl0_stm0_xn,mod0_ctrl0_stm0_zn,mod0_ctrl0_stm0_wn,mod0_ctrl0_stm0_c)
+
+  []
+   
+  -- In an optimised version, the constants are defined as parameters in the machine, not in the memory
+  get_mod0_ctrl0_stm0_c!mod0_ctrl0_stm0_c ->
+    Memory_mod0_ctrl0_stm0(mod0_ctrl0_stm0_xn,mod0_ctrl0_stm0_zn,mod0_ctrl0_stm0_wn,mod0_ctrl0_stm0_c)
+  []
+   
+  mod0_ctrl0_stm0_internalSim!"mod0_ctrl0_stm0_t0" -> 
+    Memory_mod0_ctrl0_stm0(mod0_ctrl0_stm0_xn,mod0_ctrl0_stm0_zn,mod0_ctrl0_stm0_wn,mod0_ctrl0_stm0_c)
+  []
+  mod0_ctrl0_stm0_internalSim!"mod0_ctrl0_stm0_s0_to_ds0" -> 
+    Memory_mod0_ctrl0_stm0(mod0_ctrl0_stm0_xn,mod0_ctrl0_stm0_zn,mod0_ctrl0_stm0_wn,mod0_ctrl0_stm0_c)
+  []
+
+  mod0_ctrl0_stm0_endexec!"mod0_ctrl0_stm0_ds0_to_j0" -> 
+    Memory_mod0_ctrl0_stm0(mod0_ctrl0_stm0_xn,mod0_ctrl0_stm0_zn,mod0_ctrl0_stm0_wn,mod0_ctrl0_stm0_c)
+
+  []
+  (mod0_ctrl0_stm0_xn >= mod0_ctrl0_stm0_c) & mod0_ctrl0_stm0_internalSim!"mod0_ctrl0_stm0_j0_to_ds0" -> 
+    Memory_mod0_ctrl0_stm0(mod0_ctrl0_stm0_xn,mod0_ctrl0_stm0_zn,mod0_ctrl0_stm0_wn,mod0_ctrl0_stm0_c)
+  []
+  (mod0_ctrl0_stm0_xn < mod0_ctrl0_stm0_c) & mod0_ctrl0_stm0_internalSim!"mod0_ctrl0_stm0_j0_to_s0" -> 
+    Memory_mod0_ctrl0_stm0(mod0_ctrl0_stm0_xn,mod0_ctrl0_stm0_zn,mod0_ctrl0_stm0_wn,mod0_ctrl0_stm0_c)
+
+-- assert Memory_mod0_ctrl0_stm0(0,0,0,1) :[deadlock free[F]]
+-- assert Memory_mod0_ctrl0_stm0(0,0,0,1) :[deterministic[F]]
+-- assert Memory_mod0_ctrl0_stm0(0,0,0,1) :[divergence free]
+
+-----------------------------------------------
+-- Optimized memory process for machine stm0 --
+-----------------------------------------------
+
+channel getV_mod0_ctrl0_stm0_x: nat
+channel getV_mod0_ctrl0_stm0_z: nat
+channel getV_mod0_ctrl0_stm0_w: nat
+
+Memory_mod0_ctrl0_stm0_x(mod0_ctrl0_stm0_xn) = 
+  get_mod0_ctrl0_stm0_x!mod0_ctrl0_stm0_xn ->
+    Memory_mod0_ctrl0_stm0_x(mod0_ctrl0_stm0_xn)
+  []
+  registerRead.imod0_ctrl0_stm0_x?mod0_ctrl0_stm0_xn -> 
+    Memory_mod0_ctrl0_stm0_x(mod0_ctrl0_stm0_xn)
+  []
+  set_mod0_ctrl0_stm0_x?mod0_ctrl0_stm0_xn -> 
+    Memory_mod0_ctrl0_stm0_x(mod0_ctrl0_stm0_xn)
+  []
+  getV_mod0_ctrl0_stm0_x!mod0_ctrl0_stm0_xn -> Memory_mod0_ctrl0_stm0_x(mod0_ctrl0_stm0_xn)
+
+Memory_mod0_ctrl0_stm0_z(mod0_ctrl0_stm0_zn) = 
+  get_mod0_ctrl0_stm0_z!mod0_ctrl0_stm0_zn -> Memory_mod0_ctrl0_stm0_z(mod0_ctrl0_stm0_zn)
+  []
+  set_mod0_ctrl0_stm0_z?mod0_ctrl0_stm0_zn -> Memory_mod0_ctrl0_stm0_z(mod0_ctrl0_stm0_zn)
+  []
+  registerRead.imod0_ctrl0_stm0_z?mod0_ctrl0_stm0_zn -> 
+    Memory_mod0_ctrl0_stm0_z(mod0_ctrl0_stm0_zn)
+  []
+  getV_mod0_ctrl0_stm0_z!mod0_ctrl0_stm0_zn -> Memory_mod0_ctrl0_stm0_z(mod0_ctrl0_stm0_zn)
+
+Memory_mod0_ctrl0_stm0_w(mod0_ctrl0_stm0_wn) = 
+  get_mod0_ctrl0_stm0_w!mod0_ctrl0_stm0_wn -> Memory_mod0_ctrl0_stm0_w(mod0_ctrl0_stm0_wn)
+  []
+  getV_mod0_ctrl0_stm0_w!mod0_ctrl0_stm0_wn -> Memory_mod0_ctrl0_stm0_w(mod0_ctrl0_stm0_wn)
+  []
+  set_mod0_ctrl0_stm0_w?mod0_ctrl0_stm0_wn -> Memory_mod0_ctrl0_stm0_w(mod0_ctrl0_stm0_wn)
+
+MemoryTransitions_mod0_ctrl0_stm0(mod0_ctrl0_stm0_c) = 
+  getV_mod0_ctrl0_stm0_x?mod0_ctrl0_stm0_xn -> 
+  getV_mod0_ctrl0_stm0_z?mod0_ctrl0_stm0_zn -> 
+  getV_mod0_ctrl0_stm0_w?mod0_ctrl0_stm0_wn ->
+    (mod0_ctrl0_stm0_internalSim!"mod0_ctrl0_stm0_t0" -> 
+       MemoryTransitions_mod0_ctrl0_stm0(mod0_ctrl0_stm0_c)
+     []
+     mod0_ctrl0_stm0_internalSim!"mod0_ctrl0_stm0_s0_to_ds0" -> 
+       MemoryTransitions_mod0_ctrl0_stm0(mod0_ctrl0_stm0_c)
+     []
+     mod0_ctrl0_stm0_endexec!"mod0_ctrl0_stm0_ds0_to_j0" -> 
+       MemoryTransitions_mod0_ctrl0_stm0(mod0_ctrl0_stm0_c)
+     []
+     (mod0_ctrl0_stm0_xn < mod0_ctrl0_stm0_c) & (mod0_ctrl0_stm0_internalSim!"mod0_ctrl0_stm0_j0_to_s0" ->
+       MemoryTransitions_mod0_ctrl0_stm0(mod0_ctrl0_stm0_c))
+     []
+     (mod0_ctrl0_stm0_xn >= mod0_ctrl0_stm0_c) & (mod0_ctrl0_stm0_internalSim!"mod0_ctrl0_stm0_j0_to_ds0" ->
+       MemoryTransitions_mod0_ctrl0_stm0(mod0_ctrl0_stm0_c))
+     []
+     registerRead.imod0_ctrl0_stm0_x?mod0_ctrl0_stm0_xn -> MemoryTransitions_mod0_ctrl0_stm0(mod0_ctrl0_stm0_c)
+     []
+     registerRead.imod0_ctrl0_stm0_z?mod0_ctrl0_stm0_zn -> MemoryTransitions_mod0_ctrl0_stm0(mod0_ctrl0_stm0_c)
+     []     
+     set_mod0_ctrl0_stm0_x?mod0_ctrl0_stm0_xn -> MemoryTransitions_mod0_ctrl0_stm0(mod0_ctrl0_stm0_c)
+     []
+     set_mod0_ctrl0_stm0_z?mod0_ctrl0_stm0_zn -> MemoryTransitions_mod0_ctrl0_stm0(mod0_ctrl0_stm0_c)
+     []
+     set_mod0_ctrl0_stm0_w?mod0_ctrl0_stm0_wn -> MemoryTransitions_mod0_ctrl0_stm0(mod0_ctrl0_stm0_c))
+
+MemoryVariablesProcesses_mod0_ctrl0_stm0 = 
+  { Memory_mod0_ctrl0_stm0_x(0), Memory_mod0_ctrl0_stm0_z(0),Memory_mod0_ctrl0_stm0_w(0) }
+
+MemoryVariables_mod0_ctrl0_stm0 = ||| P : MemoryVariablesProcesses_mod0_ctrl0_stm0 @ P
+
+MemoryVariablesSyncSet_mod0_ctrl0_stm0 = {|
+  set_mod0_ctrl0_stm0_x,
+  set_mod0_ctrl0_stm0_z,
+  set_mod0_ctrl0_stm0_w,
+  registerRead.imod0_ctrl0_stm0_x,
+  registerRead.imod0_ctrl0_stm0_z,
+  getV_mod0_ctrl0_stm0_x,
+  getV_mod0_ctrl0_stm0_z,
+  getV_mod0_ctrl0_stm0_w|}
+
+MemoryVariablesHideSet_mod0_ctrl0_stm0 = {|getV_mod0_ctrl0_stm0_x,getV_mod0_ctrl0_stm0_z,getV_mod0_ctrl0_stm0_w|}
+
+MemoryN_mod0_ctrl0_stm0(mod0_ctrl0_stm0_c) = 
+  (wbisim(MemoryVariables_mod0_ctrl0_stm0) 
+    [| MemoryVariablesSyncSet_mod0_ctrl0_stm0 |] 
+   wbisim(MemoryTransitions_mod0_ctrl0_stm0(mod0_ctrl0_stm0_c))) \ MemoryVariablesHideSet_mod0_ctrl0_stm0
+
+-- assert Memory_mod0_ctrl0_stm0(0,0,0,1) [FD= MemoryN_mod0_ctrl0_stm0(1)
+-- assert MemoryN_mod0_ctrl0_stm0(1) [FD= Memory_mod0_ctrl0_stm0(0,0,0,1)
+
+-----------------------------
+-- Clocks for machine stm0 --
+-----------------------------
+-- declare clocks
+mod0_ctrl0_stm0_Clocks = { }
+
+channel mod0_ctrl0_stm0_clockReset -- no clocks declared
+ 						
+-- compile waiting conditions
+
+mod0_ctrl0_stm0_WC_enablerSet = {"dummy"}
+
+channel mod0_ctrl0_stm0_WC : mod0_ctrl0_stm0_WC_enablerSet.Bool
+
+mod0_ctrl0_stm0_WCset = {  }
+
+mod0_ctrl0_stm0_WCsync = {||}
+
+mod0_ctrl0_stm0_WCresets = {||}
+
+Timed(OneStep) {
+  WaitingConditionsSim_mod0_ctrl0_stm0 = 
+  || (alpha, P) : mod0_ctrl0_stm0_WCset @ [alpha] wbisim(P)
+}
+
+Clocks_mod0_ctrl0_stm0 = WaitingConditionsSim_mod0_ctrl0_stm0
+
+-- assert Clocks_mod0_ctrl0_stm0 :[deadlock free[F]]
+-- assert Clocks_mod0_ctrl0_stm0 :[deterministic[F]]
+-- assert Clocks_mod0_ctrl0_stm0 :[divergence free]
+
+--------------------------------
+-- Behaviour for machine stm0 --
+--------------------------------
+Behaviour_mod0_ctrl0_stm0 = 
+  startexec ->  
+  ((((CoreBehaviours_mod0_ctrl0_stm0) \ Enter_Exit_Exited_mod0_ctrl0_stm0) 
+    [|{mod0_ctrl0_stm0_Behaviour_terminate}|> SKIP) \ {end});  
+  Ending_mod0_ctrl0_stm0
+
+Enter_Exit_Exited_mod0_ctrl0_stm0 = {|mod0_ctrl0_stm0_enterVSim, mod0_ctrl0_stm0_exitVSim, mod0_ctrl0_stm0_exitedVSim |}
+
+Ending_mod0_ctrl0_stm0 = mod0_ctrl0_stm0_endexec?tid -> (startexec -> Ending_mod0_ctrl0_stm0 [] end -> SKIP)   					
+
+channel mod0_ctrl0_stm0_Behaviour_terminate
+ 	
+CoreBehaviours_mod0_ctrl0_stm0 = 
+ (I_mod0_ctrl0_stm0_i0Sim
+    [|{|mod0_ctrl0_stm0_enterSim.x.y,
+ 		mod0_ctrl0_stm0_enteredSim.x.y,
+ 		mod0_ctrl0_stm0_exitSim.x.y,
+ 		mod0_ctrl0_stm0_exitedSim.x.y |
+ 		x <- diff(mod0_ctrl0_stm0_SIDSSim,{"mod0_ctrl0_stm0_s0","mod0_ctrl0_stm0_ds0"}),
+ 		y <- {"mod0_ctrl0_stm0_s0","mod0_ctrl0_stm0_ds0"}
+       |}|]
+ (S_mod0_ctrl0_stm0_s0_RSim
+   [|inter(CS_mod0_ctrl0_stm0_s0_syncSim,CS_mod0_ctrl0_stm0_ds0_syncSim)|]
+  S_mod0_ctrl0_stm0_ds0_RSim)
+   \mod0_ctrl0_stm0_internal_eventsSim 	)
+
+channel mod0_ctrl0_stm0_enteredVSim, mod0_ctrl0_stm0_enterVSim, mod0_ctrl0_stm0_exitVSim, mod0_ctrl0_stm0_exitedVSim: mod0_ctrl0_stm0_SIDSSim
+channel mod0_ctrl0_stm0_enterSim, mod0_ctrl0_stm0_enteredSim: mod0_ctrl0_stm0_SIDSSim.mod0_ctrl0_stm0_SIDSSim
+channel mod0_ctrl0_stm0_exitSim,mod0_ctrl0_stm0_exitedSim: mod0_ctrl0_stm0_SIDSSim.mod0_ctrl0_stm0_SIDSSim
+
+mod0_ctrl0_stm0_SIDSSim = {
+  "mod0_ctrl0_stm0",
+  "mod0_ctrl0_stm0_s0",
+  "mod0_ctrl0_stm0_ds0"
+}
+
+mod0_ctrl0_stm0_TIDSSim = {
+  "mod0_ctrl0_stm0_NULLTRANSITION",
+  "mod0_ctrl0_stm0_t0",
+  "mod0_ctrl0_stm0_s0_to_ds0",
+  "mod0_ctrl0_stm0_ds0_to_j0",
+  "mod0_ctrl0_stm0_j0_to_ds0",
+  "mod0_ctrl0_stm0_j0_to_s0"
+}
+  
+mod0_ctrl0_stm0_internal_eventsSim = {| 
+  mod0_ctrl0_stm0_enterSim,
+  mod0_ctrl0_stm0_enteredSim,
+  mod0_ctrl0_stm0_exitSim,
+  mod0_ctrl0_stm0_exitedSim 
+|}
+
+CS_mod0_ctrl0_stm0_s0_syncSim = {|
+  mod0_ctrl0_stm0_enterSim.y.x, 
+  mod0_ctrl0_stm0_enteredSim.y.x, 
+  mod0_ctrl0_stm0_exitSim.y.x, 
+  mod0_ctrl0_stm0_exitedSim.y.x,
+  mod0_ctrl0_stm0_enterSim.x.y, 
+  mod0_ctrl0_stm0_enteredSim.x.y, 
+  mod0_ctrl0_stm0_exitSim.x.y, 
+  mod0_ctrl0_stm0_exitedSim.x.y |
+  x <- {"mod0_ctrl0_stm0_s0","mod0_ctrl0_stm0_ds0"},
+  y <- {"mod0_ctrl0_stm0_s0"}
+|}
+ 
+mod0_ctrl0_stm0_s0_triggersSim = {|
+  mod0_ctrl0_stm0_internalSim."mod0_ctrl0_stm0_s0_to_ds0",
+  mod0_ctrl0_stm0_internalSim."mod0_ctrl0_stm0_j0_to_s0",
+  mod0_ctrl0_stm0_endexec."mod0_ctrl0_stm0_ds0_to_j0",
+  mod0_ctrl0_stm0_internalSim."mod0_ctrl0_stm0_j0_to_ds0"
+|}
+ 		   
+S_mod0_ctrl0_stm0_s0Sim = let
+  T_mod0_ctrl0_stm0_s0_to_ds0Sim = 
+    mod0_ctrl0_stm0_internalSim!"mod0_ctrl0_stm0_s0_to_ds0" ->  
+    mod0_ctrl0_stm0_exitSim!"mod0_ctrl0_stm0_s0"!"mod0_ctrl0_stm0_s0" -> SKIP;
+    SKIP;
+    mod0_ctrl0_stm0_exitedSim!"mod0_ctrl0_stm0_s0"!"mod0_ctrl0_stm0_s0" -> SKIP;
+ 	mod0_ctrl0_stm0_enterSim!"mod0_ctrl0_stm0_s0"!"mod0_ctrl0_stm0_ds0" -> 
+    mod0_ctrl0_stm0_enteredSim!"mod0_ctrl0_stm0_s0"!"mod0_ctrl0_stm0_ds0" ->
+ 	S_mod0_ctrl0_stm0_s0Sim
+ 	
+   S_mod0_ctrl0_stm0_s0_execute(o) = 
+ 	get_mod0_ctrl0_stm0_x?x -> get_mod0_ctrl0_stm0_w?w -> 
+    get_mod0_ctrl0_stm0_x?x -> 
+    (if member(x+1,int) then 
+      (registerWrite.omod0_ctrl0_stm0_x!(x+1) ->
+       set_mod0_ctrl0_stm0_x!(x+1) -> SKIP)
+    else 
+      (registerWrite.omod0_ctrl0_stm0_x!x ->
+       set_mod0_ctrl0_stm0_x!x -> SKIP));
+    -- set_mod0_ctrl0_stm0_x!Plus(x, w, int) ->  SKIP;
+    SKIP;
+    -- stmout_mod0_ctrl0_stm0!op1OutU -> SKIP; 
+    registerWrite.omod0_ctrl0_stm0_op1.1 -> SKIP;
+ 	mod0_ctrl0_stm0_enteredSim!o!"mod0_ctrl0_stm0_s0" ->
+ 	 (SKIP; STOP /\ (
+ 	    T_mod0_ctrl0_stm0_s0_to_ds0Sim
+ 	   	[]
+ 	   	mod0_ctrl0_stm0_internalSim?x:diff(mod0_ctrl0_stm0_TIDSSim,{"mod0_ctrl0_stm0_NULLTRANSITION","mod0_ctrl0_stm0_s0_to_ds0","mod0_ctrl0_stm0_j0_to_s0","mod0_ctrl0_stm0_ds0_to_j0","mod0_ctrl0_stm0_j0_to_ds0"}) ->
+ 	   	mod0_ctrl0_stm0_exitSim?y:diff(mod0_ctrl0_stm0_SIDSSim,{"mod0_ctrl0_stm0_s0"})!"mod0_ctrl0_stm0_s0" -> (
+ 	   	SKIP;
+ 	   	mod0_ctrl0_stm0_exitedSim!y!"mod0_ctrl0_stm0_s0" -> SKIP);
+ 	   	S_mod0_ctrl0_stm0_s0Sim
+ 	   )
+ 	)
+within
+  mod0_ctrl0_stm0_enterSim?x:diff(mod0_ctrl0_stm0_SIDSSim,{"mod0_ctrl0_stm0_s0"})!"mod0_ctrl0_stm0_s0" -> ( 
+  S_mod0_ctrl0_stm0_s0_execute(x)) 
+  
+CS_mod0_ctrl0_stm0_ds0_syncSim = {|
+  mod0_ctrl0_stm0_enterSim.y.x, 
+  mod0_ctrl0_stm0_enteredSim.y.x, 
+  mod0_ctrl0_stm0_exitSim.y.x, 
+  mod0_ctrl0_stm0_exitedSim.y.x,
+  mod0_ctrl0_stm0_enterSim.x.y, 
+  mod0_ctrl0_stm0_enteredSim.x.y, 
+  mod0_ctrl0_stm0_exitSim.x.y, 
+  mod0_ctrl0_stm0_exitedSim.x.y |
+  x <- {"mod0_ctrl0_stm0_s0","mod0_ctrl0_stm0_ds0"},
+  y <- {"mod0_ctrl0_stm0_ds0"}
+|}
+ 
+mod0_ctrl0_stm0_ds0_triggersSim = {|
+  mod0_ctrl0_stm0_internalSim."mod0_ctrl0_stm0_s0_to_ds0",
+  mod0_ctrl0_stm0_internalSim."mod0_ctrl0_stm0_j0_to_s0",
+  mod0_ctrl0_stm0_endexec."mod0_ctrl0_stm0_ds0_to_j0",
+  mod0_ctrl0_stm0_internalSim."mod0_ctrl0_stm0_j0_to_ds0"
+|}
+ 		   
+S_mod0_ctrl0_stm0_ds0Sim = let
+  T_mod0_ctrl0_stm0_ds0_to_j0Sim =
+    mod0_ctrl0_stm0_endexec!"mod0_ctrl0_stm0_ds0_to_j0" -> 
+    startexec ->  
+    mod0_ctrl0_stm0_exitSim!"mod0_ctrl0_stm0_ds0"!"mod0_ctrl0_stm0_ds0" -> SKIP;
+ 	SKIP;
+    mod0_ctrl0_stm0_exitedSim!"mod0_ctrl0_stm0_ds0"!"mod0_ctrl0_stm0_ds0" -> SKIP;
+ 	get_mod0_ctrl0_stm0_x?x -> (
+ 	  (mod0_ctrl0_stm0_internalSim!"mod0_ctrl0_stm0_j0_to_ds0" -> 
+       mod0_ctrl0_stm0_enterSim!"mod0_ctrl0_stm0_ds0"!"mod0_ctrl0_stm0_ds0" -> 
+       S_mod0_ctrl0_stm0_ds0_execute("mod0_ctrl0_stm0_ds0")
+ 	  )[]
+      (mod0_ctrl0_stm0_internalSim!"mod0_ctrl0_stm0_j0_to_s0" -> 
+       -- stmout_mod0_ctrl0_stm0!ev0OutU -> SKIP;
+       registerWrite.omod0_ctrl0_stm0_ev0 -> SKIP;
+       -- stmout_mod0_ctrl0_stm0!op2OutU -> SKIP;
+       registerWrite.omod0_ctrl0_stm0_op2 -> SKIP;
+       get_mod0_ctrl0_stm0_x?x -> 
+       registerWrite.omod0_ctrl0_stm0_z.x -> set_mod0_ctrl0_stm0_z!x -> SKIP;
+       mod0_ctrl0_stm0_enterSim!"mod0_ctrl0_stm0_ds0"!"mod0_ctrl0_stm0_s0" -> 
+       mod0_ctrl0_stm0_enteredSim!"mod0_ctrl0_stm0_ds0"!"mod0_ctrl0_stm0_s0" ->
+ 	S_mod0_ctrl0_stm0_ds0Sim))
+ 	
+  S_mod0_ctrl0_stm0_ds0_execute(o) = 
+    SKIP; 
+ 	mod0_ctrl0_stm0_enteredSim!o!"mod0_ctrl0_stm0_ds0" ->
+ 	 (SKIP; STOP /\ (
+ 	   T_mod0_ctrl0_stm0_ds0_to_j0Sim
+ 	   []
+ 	   mod0_ctrl0_stm0_internalSim?x:diff(mod0_ctrl0_stm0_TIDSSim,{"mod0_ctrl0_stm0_NULLTRANSITION","mod0_ctrl0_stm0_s0_to_ds0","mod0_ctrl0_stm0_j0_to_s0","mod0_ctrl0_stm0_ds0_to_j0","mod0_ctrl0_stm0_j0_to_ds0"}) ->
+ 	   mod0_ctrl0_stm0_exitSim?y:diff(mod0_ctrl0_stm0_SIDSSim,{"mod0_ctrl0_stm0_ds0"})!"mod0_ctrl0_stm0_ds0" -> (
+ 	   SKIP;
+ 	   mod0_ctrl0_stm0_exitedSim!y!"mod0_ctrl0_stm0_ds0" -> SKIP);
+ 	   S_mod0_ctrl0_stm0_ds0Sim))
+ 
+within
+  mod0_ctrl0_stm0_enterSim?x:diff(mod0_ctrl0_stm0_SIDSSim,{"mod0_ctrl0_stm0_ds0"})!"mod0_ctrl0_stm0_ds0" -> ( 
+ 	S_mod0_ctrl0_stm0_ds0_execute(x)) 
+  						
+I_mod0_ctrl0_stm0_i0Sim = T_mod0_ctrl0_stm0_t0Sim
+  	
+mod0_ctrl0_stm0_int_intSim = {|
+  mod0_ctrl0_stm0_endexec."mod0_ctrl0_stm0_t0",
+  mod0_ctrl0_stm0_internalSim."mod0_ctrl0_stm0_t0",
+  mod0_ctrl0_stm0_endexec."mod0_ctrl0_stm0_s0_to_ds0",
+  mod0_ctrl0_stm0_internalSim."mod0_ctrl0_stm0_s0_to_ds0",
+  mod0_ctrl0_stm0_endexec."mod0_ctrl0_stm0_ds0_to_j0",
+  mod0_ctrl0_stm0_internalSim."mod0_ctrl0_stm0_ds0_to_j0",
+  mod0_ctrl0_stm0_endexec."mod0_ctrl0_stm0_j0_to_ds0",
+  mod0_ctrl0_stm0_internalSim."mod0_ctrl0_stm0_j0_to_ds0",
+  mod0_ctrl0_stm0_endexec."mod0_ctrl0_stm0_j0_to_s0",
+  mod0_ctrl0_stm0_internalSim."mod0_ctrl0_stm0_j0_to_s0"
+|}
+  
+T_mod0_ctrl0_stm0_t0Sim = 
+  mod0_ctrl0_stm0_internalSim!"mod0_ctrl0_stm0_t0" -> 
+  set_mod0_ctrl0_stm0_w!1 -> 
+  SKIP;
+  mod0_ctrl0_stm0_enterSim!"mod0_ctrl0_stm0"!"mod0_ctrl0_stm0_s0" -> 
+  mod0_ctrl0_stm0_enteredSim!"mod0_ctrl0_stm0"!"mod0_ctrl0_stm0_s0" ->
+  SKIP
+  
+S_mod0_ctrl0_stm0_s0_RSim = S_mod0_ctrl0_stm0_s0Sim
+  [|diff(mod0_ctrl0_stm0_int_intSim,mod0_ctrl0_stm0_s0_triggersSim)|]
+  SKIP
+   		
+S_mod0_ctrl0_stm0_ds0_RSim = S_mod0_ctrl0_stm0_ds0Sim
+  [|diff(mod0_ctrl0_stm0_int_intSim,mod0_ctrl0_stm0_ds0_triggersSim)|]
+  SKIP
+   		
+-- assert Behaviour_mod0_ctrl0_stm0 :[deadlock free[F]]
+-- assert Behaviour_mod0_ctrl0_stm0 :[deterministic[F]]
+-- assert Behaviour_mod0_ctrl0_stm0 :[divergence free]
+
+---------------------------
+-- Machine process: stm1 --
+---------------------------
+-- inputs = {mod0_ctrl0_stm1_x,mod0_ctrl0_stm1_ev5}
+-- outputs = {mod0_ctrl0_stm1_x,mod0_ctrl0_stm1_z,mod0_ctrl0_stm1_ev2,mod0_ctrl0_stm1_op1}
+
+-- declaring identifiers of transitions
+mod0_ctrl0_stm1_TIDSSim = {
+	"mod0_ctrl0_stm0_NULLTRANSITION",
+	"mod0_ctrl0_stm1_t0",
+	"mod0_ctrl0_stm1_s0_to_ds0",
+	"mod0_ctrl0_stm1_ds0_to_j0",
+	"mod0_ctrl0_stm1_j0_to_ds0",
+	"mod0_ctrl0_stm1_j0_to_ds0_1"
+}
+  
+channel mod0_ctrl0_stm1_endexec : mod0_ctrl0_stm1_TIDSSim
+
+-- We're assuming here that there are no time primitives in the example. 
+mod0_ctrl0_stm1 =  
+  prioritise(
+  -- For optimisation, the Behaviour and Memory processes take the constant as
+  -- a parameter, instead of communicating.  This is not how it is formalised in
+  -- the semantic rules. 
+    (((Cycle_mod0_ctrl0_stm1
+	[| {|registerRead,mod0_ctrl0_stm1_endexec,tock|} |] 
+    (set_mod0_ctrl0_stm1_c?mod0_ctrl0_stm1_c -> Memory_mod0_ctrl0_stm1(0,0,false,mod0_ctrl0_stm1_c)
+   	[| union({|mod0_ctrl0_stm1_WC|},mod0_ctrl0_stm1_WCsync) |] 
+ 	Clocks_mod0_ctrl0_stm1) \ {| mod0_ctrl0_stm1_WC |})
+ 	[| union( {| get_mod0_ctrl0_stm1_x,set_mod0_ctrl0_stm1_x,
+                 get_mod0_ctrl0_stm1_z,set_mod0_ctrl0_stm1_z,
+                 get_mod0_ctrl0_stm1_c,
+                 get_mod0_ctrl0_stm1_ev5, 
+                 mod0_ctrl0_stm1_internalSim,
+                 mod0_ctrl0_stm1_clockReset, 
+                 startexec,
+                 mod0_ctrl0_stm1_endexec,registerWrite,
+                 end |}, mod0_ctrl0_stm1_WCsync ) |]              
+    Behaviour_mod0_ctrl0_stm1) 
+	\ {| get_mod0_ctrl0_stm1_x,set_mod0_ctrl0_stm1_x,
+         get_mod0_ctrl0_stm1_z,set_mod0_ctrl0_stm1_z,
+         get_mod0_ctrl0_stm1_c,
+         get_mod0_ctrl0_stm1_ev5,
+         mod0_ctrl0_stm1_clockReset,
+         mod0_ctrl0_stm1_internalSim, 
+         mod0_ctrl0_stm1_enteredSim,
+         startexec |}             
+ 	) [|{end}|> SKIP
+   , <{},{tock}>)			
+
+assert mod0_ctrl0_stm1 :[deadlock free[F]]
+assert mod0_ctrl0_stm1 :[deterministic[F]]
+assert mod0_ctrl0_stm1 :[divergence free]
+
+------------------------------------------------------------------------
+-------------------- Cycle for Machine stm1 ----------------------------
+------------------------------------------------------------------------
+
+mod0_ctrl0_stm1_cycle = 1
+
+-- outputs = {mod0_ctrl0_stm1_x,mod0_ctrl0_stm1_z,mod0_ctrl0_stm1_ev2,mod0_ctrl0_stm1_op1}
+
+-- Projection of the data type of outputs that identifies the outputs 
+-- available without the values that can be output. 
+datatype COutputEventsOp_mod0_ctrl0_stm1 = 
+  Cmod0_ctrl0_stm1_x
+  | Cmod0_ctrl0_stm1_z
+  | Cmod0_ctrl0_stm1_ev2
+  
+TakeInputs_mod0_ctrl0_stm1 = 
+  registerRead.imod0_ctrl0_stm1_x?mod0_ctrl0_stm1_xn -> SKIP 
+  |||
+  registerRead.imod0_ctrl0_stm1_z?mod0_ctrl0_stm1_zn -> SKIP 
+  |||
+  registerRead.imod0_ctrl0_stm1_ev5?mod0_ctrl0_stm1_ev5n -> SKIP 
+
+-- assert Cycle_mod0_ctrl0_stm1 :[deadlock free[F]]
+-- assert Cycle_mod0_ctrl0_stm1 :[deterministic[F]]
+-- assert Cycle_mod0_ctrl0_stm1 :[divergence free]
+
+Cycle_mod0_ctrl0_stm1 = 
+  TakeInputs_mod0_ctrl0_stm1; 
+  startexec ->  
+  CollectOutputs_mod0_ctrl0_stm1(COutputEventsOp_mod0_ctrl0_stm1);
+  (wait(mod0_ctrl0_stm1_cycle) [] end -> SKIP); 
+  Cycle_mod0_ctrl0_stm1
+
+project_mod0_ctrl0_stm1(omod0_ctrl0_stm1_x.n) = Cmod0_ctrl0_stm1_x
+project_mod0_ctrl0_stm1(omod0_ctrl0_stm1_ev2) = Cmod0_ctrl0_stm1_ev2
+project_mod0_ctrl0_stm1(omod0_ctrl0_stm1_z.n) = Cmod0_ctrl0_stm1_z
+
+nametype OutputEventsOp_mod0_ctrl0_stm1 = {|
+  omod0_ctrl0_stm1_x,
+  omod0_ctrl0_stm1_ev2,
+  omod0_ctrl0_stm1_z |}
+
+CollectOutputs_mod0_ctrl0_stm1(sout) = 
+  registerWrite?outp:{ outp | out <- sout, outp <- OutputEventsOp_mod0_ctrl0_stm1,project_mod0_ctrl0_stm1(outp) == out} -> 
+    CollectOutputs_mod0_ctrl0_stm1(diff(sout,{project_mod0_ctrl0_stm1(outp)}))
+  []
+  mod0_ctrl0_stm1_endexec?tid -> SKIP -- NoOther_mod0_ctrl0_stm1(sout)
+  
+------------------------------------------------------------------------
+------------------- Memory for machine stm1 ----------------------------
+------------------------------------------------------------------------
+
+channel get_mod0_ctrl0_stm1_x, set_mod0_ctrl0_stm1_x: nat
+channel get_mod0_ctrl0_stm1_z, set_mod0_ctrl0_stm1_z: nat
+channel get_mod0_ctrl0_stm1_ev5: Bool
+channel get_mod0_ctrl0_stm1_c: nat
+channel mod0_ctrl0_stm1_internalSim: mod0_ctrl0_stm1_TIDSSim
+
+Memory_mod0_ctrl0_stm1(mod0_ctrl0_stm1_xn,mod0_ctrl0_stm1_zn,mod0_ctrl0_stm1_ev5n,mod0_ctrl0_stm1_c) =
+
+  get_mod0_ctrl0_stm1_x!mod0_ctrl0_stm1_xn ->
+    Memory_mod0_ctrl0_stm1(mod0_ctrl0_stm1_xn,mod0_ctrl0_stm1_zn,mod0_ctrl0_stm1_ev5n,mod0_ctrl0_stm1_c)
+  []
+  registerRead.imod0_ctrl0_stm1_x?mod0_ctrl0_stm1_xn -> 
+    Memory_mod0_ctrl0_stm1(mod0_ctrl0_stm1_xn,mod0_ctrl0_stm1_zn,mod0_ctrl0_stm1_ev5n,mod0_ctrl0_stm1_c)
+  []
+  set_mod0_ctrl0_stm1_x?mod0_ctrl0_stm1_xn -> 
+    Memory_mod0_ctrl0_stm1(mod0_ctrl0_stm1_xn,mod0_ctrl0_stm1_zn,mod0_ctrl0_stm1_ev5n,mod0_ctrl0_stm1_c)
+
+  []
+  get_mod0_ctrl0_stm1_z!mod0_ctrl0_stm1_zn ->
+  Memory_mod0_ctrl0_stm1(mod0_ctrl0_stm1_xn,mod0_ctrl0_stm1_zn,mod0_ctrl0_stm1_ev5n,mod0_ctrl0_stm1_c)
+  []
+  registerRead.imod0_ctrl0_stm1_z?mod0_ctrl0_stm1_zn -> 
+    Memory_mod0_ctrl0_stm1(mod0_ctrl0_stm1_xn,mod0_ctrl0_stm1_zn,mod0_ctrl0_stm1_ev5n,mod0_ctrl0_stm1_c)
+  []
+  set_mod0_ctrl0_stm1_z?mod0_ctrl0_stm1_zn -> 
+    Memory_mod0_ctrl0_stm1(mod0_ctrl0_stm1_xn,mod0_ctrl0_stm1_zn,mod0_ctrl0_stm1_ev5n,mod0_ctrl0_stm1_c)
+
+  []
+  get_mod0_ctrl0_stm1_ev5!mod0_ctrl0_stm1_ev5n ->
+    Memory_mod0_ctrl0_stm1(mod0_ctrl0_stm1_xn,mod0_ctrl0_stm1_zn,mod0_ctrl0_stm1_ev5n,mod0_ctrl0_stm1_c)
+  []
+  registerRead.imod0_ctrl0_stm1_ev5?mod0_ctrl0_stm1_ev5n -> 
+    Memory_mod0_ctrl0_stm1(mod0_ctrl0_stm1_xn,mod0_ctrl0_stm1_zn,mod0_ctrl0_stm1_ev5n,mod0_ctrl0_stm1_c)
+  
+  []
+  get_mod0_ctrl0_stm1_c!mod0_ctrl0_stm1_c ->
+    Memory_mod0_ctrl0_stm1(mod0_ctrl0_stm1_xn,mod0_ctrl0_stm1_zn,mod0_ctrl0_stm1_ev5n,mod0_ctrl0_stm1_c)
+  []
+   
+  mod0_ctrl0_stm1_internalSim!"mod0_ctrl0_stm1_t0" -> 
+    Memory_mod0_ctrl0_stm1(mod0_ctrl0_stm1_xn,mod0_ctrl0_stm1_zn,mod0_ctrl0_stm1_ev5n,mod0_ctrl0_stm1_c)
+  []
+  mod0_ctrl0_stm1_internalSim!"mod0_ctrl0_stm1_s0_to_ds0" -> 
+    Memory_mod0_ctrl0_stm1(mod0_ctrl0_stm1_xn,mod0_ctrl0_stm1_zn,mod0_ctrl0_stm1_ev5n,mod0_ctrl0_stm1_c)
+  []
+  mod0_ctrl0_stm1_endexec!"mod0_ctrl0_stm1_ds0_to_j0" -> 
+    Memory_mod0_ctrl0_stm1(mod0_ctrl0_stm1_xn,mod0_ctrl0_stm1_zn,mod0_ctrl0_stm1_ev5n,mod0_ctrl0_stm1_c)
+  []
+  (not (mod0_ctrl0_stm1_ev5n and mod0_ctrl0_stm1_xn >= mod0_ctrl0_stm1_c and mod0_ctrl0_stm1_zn == mod0_ctrl0_stm1_xn)) & 
+      mod0_ctrl0_stm1_internalSim!"mod0_ctrl0_stm1_j0_to_ds0_1" -> 
+        Memory_mod0_ctrl0_stm1(mod0_ctrl0_stm1_xn,mod0_ctrl0_stm1_zn,mod0_ctrl0_stm1_ev5n,mod0_ctrl0_stm1_c)
+  []
+  (mod0_ctrl0_stm1_ev5n and mod0_ctrl0_stm1_xn >= mod0_ctrl0_stm1_c and mod0_ctrl0_stm1_zn == mod0_ctrl0_stm1_xn) & 
+    mod0_ctrl0_stm1_internalSim!"mod0_ctrl0_stm1_j0_to_ds0" -> 
+      Memory_mod0_ctrl0_stm1(mod0_ctrl0_stm1_xn,mod0_ctrl0_stm1_zn,mod0_ctrl0_stm1_ev5n,mod0_ctrl0_stm1_c)
+
+------------------------------------------------------------------------
+------------------- Clocks for Machine stm1 ----------------------------
+------------------------------------------------------------------------
+-- declare clocks
+mod0_ctrl0_stm1_Clocks = { }
+
+channel mod0_ctrl0_stm1_clockReset -- no clocks declared
+ 						
+-- compile waiting conditions
+
+mod0_ctrl0_stm1_WC_enablerSet = {"dummy"}
+
+channel mod0_ctrl0_stm1_WC : mod0_ctrl0_stm1_WC_enablerSet.Bool
+
+mod0_ctrl0_stm1_WCset = {  }
+
+mod0_ctrl0_stm1_WCsync = {||}
+
+mod0_ctrl0_stm1_WCresets = {||}
+
+Timed(OneStep) {
+  WaitingConditionsSim_mod0_ctrl0_stm1 = 
+  || (alpha, P) : mod0_ctrl0_stm1_WCset @ [alpha] wbisim(P)
+}
+
+Clocks_mod0_ctrl0_stm1 = WaitingConditionsSim_mod0_ctrl0_stm1
+
+------------------------------------------------------------------------
+-------------------- Behaviour for Machine stm1 ---------------------------
+------------------------------------------------------------------------
+
+Behaviour_mod0_ctrl0_stm1 = 
+  startexec ->  
+  ((((CoreBehaviours_mod0_ctrl0_stm1) \ Enter_Exit_Exited_mod0_ctrl0_stm1) 
+    [|{mod0_ctrl0_stm1_Behaviour_terminate}|> SKIP) \ {end});  
+  Ending_mod0_ctrl0_stm1
+
+-- assert Behaviour_mod0_ctrl0_stm1 :[deadlock free[F]]
+-- assert Behaviour_mod0_ctrl0_stm1 :[deterministic[F]]
+-- assert Behaviour_mod0_ctrl0_stm1 :[divergence free]
+
+channel mod0_ctrl0_stm1_Behaviour_terminate
+
+Ending_mod0_ctrl0_stm1 = 
+  mod0_ctrl0_stm1_endexec?tid -> (startexec -> Ending_mod0_ctrl0_stm1 [] end -> SKIP)   					
+ 	
+Enter_Exit_Exited_mod0_ctrl0_stm1 = 
+  {|mod0_ctrl0_stm1_enterVSim, mod0_ctrl0_stm1_exitVSim, mod0_ctrl0_stm1_exitedVSim |}
+
+CoreBehaviours_mod0_ctrl0_stm1 = 
+   (I_mod0_ctrl0_stm1_i0Sim
+   [|{|mod0_ctrl0_stm1_enterSim.x.y,
+   		mod0_ctrl0_stm1_enteredSim.x.y,
+   		mod0_ctrl0_stm1_exitSim.x.y,
+   		mod0_ctrl0_stm1_exitedSim.x.y |
+   		x <- diff(mod0_ctrl0_stm1_SIDSSim,{"mod0_ctrl0_stm1_s0","mod0_ctrl0_stm1_ds0"}),
+   		y <- {"mod0_ctrl0_stm1_s0","mod0_ctrl0_stm1_ds0"}
+   |}|]
+   (S_mod0_ctrl0_stm1_s0_RSim
+     [|inter(CS_mod0_ctrl0_stm1_s0_syncSim,CS_mod0_ctrl0_stm1_ds0_syncSim)|]
+    S_mod0_ctrl0_stm1_ds0_RSim)
+     \mod0_ctrl0_stm1_internal_eventsSim 	) 
+
+channel mod0_ctrl0_stm1_enteredVSim, mod0_ctrl0_stm1_enterVSim, mod0_ctrl0_stm1_exitVSim, mod0_ctrl0_stm1_exitedVSim : mod0_ctrl0_stm1_SIDSSim
+channel mod0_ctrl0_stm1_enterSim, mod0_ctrl0_stm1_enteredSim: mod0_ctrl0_stm1_SIDSSim.mod0_ctrl0_stm1_SIDSSim
+channel mod0_ctrl0_stm1_exitSim,mod0_ctrl0_stm1_exitedSim: mod0_ctrl0_stm1_SIDSSim.mod0_ctrl0_stm1_SIDSSim
+    
+-- declaring identifiers of state and final states
+mod0_ctrl0_stm1_SIDSSim = {
+  	"mod0_ctrl0_stm1",
+  	"mod0_ctrl0_stm1_s0",
+  	"mod0_ctrl0_stm1_ds0"
+}
+  
+mod0_ctrl0_stm1_internal_eventsSim = {|
+  mod0_ctrl0_stm1_enterSim,
+  mod0_ctrl0_stm1_enteredSim,
+  mod0_ctrl0_stm1_exitSim,mod0_ctrl0_stm1_exitedSim
+|}
+
+CS_mod0_ctrl0_stm1_s0_syncSim = {|
+  mod0_ctrl0_stm1_enterSim.y.x, 
+  mod0_ctrl0_stm1_enteredSim.y.x, 
+  mod0_ctrl0_stm1_exitSim.y.x, 
+  mod0_ctrl0_stm1_exitedSim.y.x,
+  mod0_ctrl0_stm1_enterSim.x.y, 
+  mod0_ctrl0_stm1_enteredSim.x.y, 
+  mod0_ctrl0_stm1_exitSim.x.y, 
+  mod0_ctrl0_stm1_exitedSim.x.y |
+  x <- {"mod0_ctrl0_stm1_s0","mod0_ctrl0_stm1_ds0"},
+  y <- {"mod0_ctrl0_stm1_s0"}
+|}
+ 
+mod0_ctrl0_stm1_s0_triggersSim = {|
+  mod0_ctrl0_stm1_endexec."mod0_ctrl0_stm1_ds0_to_j0",
+  mod0_ctrl0_stm1_internalSim."mod0_ctrl0_stm1_s0_to_ds0",
+  mod0_ctrl0_stm1_internalSim."mod0_ctrl0_stm1_j0_to_ds0",
+  mod0_ctrl0_stm1_internalSim."mod0_ctrl0_stm1_j0_to_ds0_1"
+|}
+ 		   
+S_mod0_ctrl0_stm1_s0Sim = let
+  T_mod0_ctrl0_stm1_s0_to_ds0Sim = 
+    mod0_ctrl0_stm1_internalSim!"mod0_ctrl0_stm1_s0_to_ds0" ->  
+    mod0_ctrl0_stm1_exitSim!"mod0_ctrl0_stm1_s0"!"mod0_ctrl0_stm1_s0" -> SKIP;
+ 	SKIP; 
+    mod0_ctrl0_stm1_exitedSim!"mod0_ctrl0_stm1_s0"!"mod0_ctrl0_stm1_s0" -> SKIP;
+ 	mod0_ctrl0_stm1_enterSim!"mod0_ctrl0_stm1_s0"!"mod0_ctrl0_stm1_ds0" -> 
+    mod0_ctrl0_stm1_enteredSim!"mod0_ctrl0_stm1_s0"!"mod0_ctrl0_stm1_ds0" ->
+ 	S_mod0_ctrl0_stm1_s0Sim
+ 	
+ 	S_mod0_ctrl0_stm1_s0_execute(o) = 
+ 	-- stmout_mod0_ctrl0_stm1!op1OutU -> SKIP; 
+ 	mod0_ctrl0_stm1_enteredSim!o!"mod0_ctrl0_stm1_s0" ->
+ 	  (SKIP; STOP /\ (
+ 	    T_mod0_ctrl0_stm1_s0_to_ds0Sim
+ 	   	[]
+ 	   	mod0_ctrl0_stm1_internalSim?x:diff(mod0_ctrl0_stm1_TIDSSim,{"mod0_ctrl0_stm0_NULLTRANSITION","mod0_ctrl0_stm1_ds0_to_j0","mod0_ctrl0_stm1_s0_to_ds0","mod0_ctrl0_stm1_j0_to_ds0","mod0_ctrl0_stm1_j0_to_ds0_1"}) ->
+        mod0_ctrl0_stm1_exitSim?y:diff(mod0_ctrl0_stm1_SIDSSim,{"mod0_ctrl0_stm1_s0"})!"mod0_ctrl0_stm1_s0" -> (
+ 	   	SKIP;
+ 	   	mod0_ctrl0_stm1_exitedSim!y!"mod0_ctrl0_stm1_s0" -> SKIP);
+ 	   	S_mod0_ctrl0_stm1_s0Sim))
+within
+  mod0_ctrl0_stm1_enterSim?x:diff(mod0_ctrl0_stm1_SIDSSim,{"mod0_ctrl0_stm1_s0"})!"mod0_ctrl0_stm1_s0" -> ( 
+  S_mod0_ctrl0_stm1_s0_execute(x)) 
+
+CS_mod0_ctrl0_stm1_ds0_syncSim = {|
+  mod0_ctrl0_stm1_enterSim.y.x, 
+  mod0_ctrl0_stm1_enteredSim.y.x, 
+  mod0_ctrl0_stm1_exitSim.y.x, 
+  mod0_ctrl0_stm1_exitedSim.y.x,
+  mod0_ctrl0_stm1_enterSim.x.y, 
+  mod0_ctrl0_stm1_enteredSim.x.y, 
+  mod0_ctrl0_stm1_exitSim.x.y, 
+  mod0_ctrl0_stm1_exitedSim.x.y |
+  x <- {"mod0_ctrl0_stm1_s0","mod0_ctrl0_stm1_ds0"},
+  y <- {"mod0_ctrl0_stm1_ds0"}
+|}
+ 
+mod0_ctrl0_stm1_ds0_triggersSim = {|
+  mod0_ctrl0_stm1_endexec."mod0_ctrl0_stm1_ds0_to_j0",
+  mod0_ctrl0_stm1_internalSim."mod0_ctrl0_stm1_s0_to_ds0",
+  mod0_ctrl0_stm1_internalSim."mod0_ctrl0_stm1_j0_to_ds0",
+  mod0_ctrl0_stm1_internalSim."mod0_ctrl0_stm1_j0_to_ds0_1"
+|}
+ 		   
+S_mod0_ctrl0_stm1_ds0Sim = let
+  T_mod0_ctrl0_stm1_ds0_to_j0Sim = 
+    mod0_ctrl0_stm1_endexec!"mod0_ctrl0_stm1_ds0_to_j0" -> 
+    startexec ->  
+    mod0_ctrl0_stm1_exitSim!"mod0_ctrl0_stm1_ds0"!"mod0_ctrl0_stm1_ds0" -> SKIP;
+ 	SKIP;
+    mod0_ctrl0_stm1_exitedSim!"mod0_ctrl0_stm1_ds0"!"mod0_ctrl0_stm1_ds0" -> SKIP;
+ 	get_mod0_ctrl0_stm1_x?x -> get_mod0_ctrl0_stm1_z?z -> (
+ 	(mod0_ctrl0_stm1_internalSim!"mod0_ctrl0_stm1_j0_to_ds0" -> 
+    -- stmout_mod0_ctrl0_stm1!ev2OutU -> SKIP;
+    registerWrite.omod0_ctrl0_stm1_ev2 -> SKIP;
+    set_mod0_ctrl0_stm1_x!0 -> SKIP;
+    registerWrite.omod0_ctrl0_stm1_x.0 -> SKIP;
+    mod0_ctrl0_stm1_enterSim!"mod0_ctrl0_stm1_ds0"!"mod0_ctrl0_stm1_s0" -> 
+    mod0_ctrl0_stm1_enteredSim!"mod0_ctrl0_stm1_ds0"!"mod0_ctrl0_stm1_s0" ->
+ 	S_mod0_ctrl0_stm1_ds0Sim)
+    []
+ 	(mod0_ctrl0_stm1_internalSim!"mod0_ctrl0_stm1_j0_to_ds0_1" -> 
+     mod0_ctrl0_stm1_enterSim!"mod0_ctrl0_stm1_ds0"!"mod0_ctrl0_stm1_ds0" -> 
+     S_mod0_ctrl0_stm1_ds0_execute("mod0_ctrl0_stm1_ds0")))
+ 
+  S_mod0_ctrl0_stm1_ds0_execute(o) = 
+    SKIP; 
+ 	mod0_ctrl0_stm1_enteredSim!o!"mod0_ctrl0_stm1_ds0" ->
+ 	(SKIP; STOP /\ (
+ 	   T_mod0_ctrl0_stm1_ds0_to_j0Sim
+ 	   []
+ 	   mod0_ctrl0_stm1_internalSim?x:diff(mod0_ctrl0_stm1_TIDSSim,{"mod0_ctrl0_stm0_NULLTRANSITION","mod0_ctrl0_stm1_ds0_to_j0","mod0_ctrl0_stm1_s0_to_ds0","mod0_ctrl0_stm1_j0_to_ds0","mod0_ctrl0_stm1_j0_to_ds0_1"}) ->
+ 	   mod0_ctrl0_stm1_exitSim?y:diff(mod0_ctrl0_stm1_SIDSSim,{"mod0_ctrl0_stm1_ds0"})!"mod0_ctrl0_stm1_ds0" -> (
+ 	   SKIP;
+ 	   mod0_ctrl0_stm1_exitedSim!y!"mod0_ctrl0_stm1_ds0" -> SKIP);
+ 	   S_mod0_ctrl0_stm1_ds0Sim))
+within
+  mod0_ctrl0_stm1_enterSim?x:diff(mod0_ctrl0_stm1_SIDSSim,{"mod0_ctrl0_stm1_ds0"})!"mod0_ctrl0_stm1_ds0" -> ( 
+  S_mod0_ctrl0_stm1_ds0_execute(x)) 
+  						
+I_mod0_ctrl0_stm1_i0Sim = T_mod0_ctrl0_stm1_t0Sim
+  						
+mod0_ctrl0_stm1_int_intSim = {|
+  mod0_ctrl0_stm1_endexec."mod0_ctrl0_stm1_t0",
+  mod0_ctrl0_stm1_internalSim."mod0_ctrl0_stm1_t0",
+  mod0_ctrl0_stm1_endexec."mod0_ctrl0_stm1_s0_to_ds0",
+  mod0_ctrl0_stm1_internalSim."mod0_ctrl0_stm1_s0_to_ds0",
+  mod0_ctrl0_stm1_endexec."mod0_ctrl0_stm1_ds0_to_j0",
+  mod0_ctrl0_stm1_internalSim."mod0_ctrl0_stm1_ds0_to_j0",
+  mod0_ctrl0_stm1_endexec."mod0_ctrl0_stm1_j0_to_ds0",
+  mod0_ctrl0_stm1_internalSim."mod0_ctrl0_stm1_j0_to_ds0",
+  mod0_ctrl0_stm1_endexec."mod0_ctrl0_stm1_j0_to_ds0_1",
+  mod0_ctrl0_stm1_internalSim."mod0_ctrl0_stm1_j0_to_ds0_1"
+|}
+  
+T_mod0_ctrl0_stm1_t0Sim	= 
+  mod0_ctrl0_stm1_internalSim!"mod0_ctrl0_stm1_t0" -> 
+  mod0_ctrl0_stm1_enterSim!"mod0_ctrl0_stm1"!"mod0_ctrl0_stm1_s0" -> 
+  mod0_ctrl0_stm1_enteredSim!"mod0_ctrl0_stm1"!"mod0_ctrl0_stm1_s0" ->
+  SKIP
+  
+S_mod0_ctrl0_stm1_s0_RSim = 
+  S_mod0_ctrl0_stm1_s0Sim
+   	[|diff(mod0_ctrl0_stm1_int_intSim,mod0_ctrl0_stm1_s0_triggersSim)|]
+  SKIP
+   		
+S_mod0_ctrl0_stm1_ds0_RSim = 
+  S_mod0_ctrl0_stm1_ds0Sim
+    [|diff(mod0_ctrl0_stm1_int_intSim,mod0_ctrl0_stm1_ds0_triggersSim)|]
+  SKIP
+   		
+-------------------------------
+-- Controller process: ctrl1 --
+-------------------------------
+
+-- Note that in the description below, we are using names of metamodel elements
+-- to identify it. In reality, these sets include the metamodel elements themselves.
+
+-- inputs = {(mod0_ctrl1_ev1,mod0_ctrl1_stm2_ev1),
+--           (mod0_ctrl1_ev2,mod0_ctrl1_stm2_ev2),
+--           (mod0_ctrl1_x,mod0_ctrl1_stm2_x) }
+-- evars = {}
+-- dvars = {}
+-- outputs = {(mod0_ctrl1_op1,mod0_ctrl1_stm2_op1),
+--            required variables used by at least one machine are inputs and outputs. 
+--            (mod0_ctrl1_x,mod0_ctrl1_stm2_x)
+--           } -- dvars are not included in outputs           
+mod0_ctrl1 =
+  prioritise(
+    ((((CycleController_mod0_ctrl1 ||| MemoryComp_mod0_ctrl1)
+       [| {| set_mod0_ctrl1_c,registerReadC,registerWriteC,tock,mod0_ctrl1_stm2_endexec |} |]
+     ComposeMachines_mod0_ctrl1)
+     \ {| registerReadC,registerWriteC,mod0_ctrl1_stm2_endexec |}) [| {end} |> SKIP) \ {end}
+    , <{},{tock}>)
+
+assert mod0_ctrl1 :[deadlock free[F]]
+assert mod0_ctrl1 :[deterministic[F]]
+assert mod0_ctrl1 :[divergence free]
+
+-- There is a subtle difference in the names of constants, and so the controller
+-- process is slightly different. 
+-- assert mod0_ctrl1 [T= mod0_ctrl1_stm2
+
+--------------------------------
+-- Cycle for controller ctrl0 --
+--------------------------------
+mod0_ctrl1_cycle = 1
+
+channel mod0_ctrl1_endexec
+
+CycleController_mod0_ctrl1 = 
+  TakeInputs_mod0_ctrl1;
+  (CollectOutputs_mod0_ctrl1(COutputEventsOp_mod0_ctrl1)
+    [| {mod0_ctrl1_endexec} |] 
+   Monitor_mod0_ctrl1_endexec);
+  wait(mod0_ctrl1_cycle);
+  CycleController_mod0_ctrl1
+
+TakeInputs_mod0_ctrl1 =
+  registerRead.imod0_ctrl1_ev1?mod0_ctrl1_ev1n -> registerReadC.imod0_ctrl1_stm2_ev1.mod0_ctrl1_ev1n -> SKIP
+       |||
+     registerRead.imod0_ctrl1_ev2?mod0_ctrl1_ev2n -> registerReadC.imod0_ctrl1_stm2_ev2.mod0_ctrl1_ev2n -> SKIP
+       |||
+     registerRead.imod0_ctrl1_x?mod0_ctrl1_xn -> registerReadC.imod0_ctrl1_stm2_x.mod0_ctrl1_xn -> SKIP
+
+CollectOutputs_mod0_ctrl1(sout) = 
+  registerWriteC?outp:{ outp | out <- sout, outp <- OutputEventsOp_mod0_ctrl1,project_mod0_ctrl1(outp) == out} ->
+    registerWrite!(lift_mod0_ctrl1(outp)) -> 
+      CollectOutputs_mod0_ctrl1(diff(sout,{project_mod0_ctrl1(outp)}))
+   []
+   registerWriteC?outp:{ outp | out <- sout, outp <- DVars_mod0_ctrl1,project_mod0_ctrl1(outp) == out} ->
+      CollectOutputs_mod0_ctrl1(diff(sout,{project_mod0_ctrl1(outp)}))
+   []
+   mod0_ctrl1_endexec -> SKIP
+
+-- Projection of the data type of outputs that identifies the outputs 
+-- available without the values that can be output. 
+datatype COutputEventsOp_mod0_ctrl1 = 
+  Cmod0_ctrl1_x
+  | Cmod0_ctrl1_op1
+  
+project_mod0_ctrl1(omod0_ctrl1_stm2_x.n) = Cmod0_ctrl1_x
+project_mod0_ctrl1(omod0_ctrl1_stm2_op1.n) = Cmod0_ctrl1_op1
+
+nametype OutputEventsOp_mod0_ctrl1 = {|
+  omod0_ctrl1_stm2_x,
+  omod0_ctrl1_stm2_op1 |}
+
+nametype DVars_mod0_ctrl1 = {| |}
+
+lift_mod0_ctrl1(omod0_ctrl1_stm2_x.n) = omod0_ctrl1_x.n
+lift_mod0_ctrl1(omod0_ctrl1_stm2_op1.n) = omod0_ctrl1_op1.n
+
+Monitor_mod0_ctrl1_endexec = 
+  mod0_ctrl1_stm2_endexec?tid -> SKIP;
+  mod0_ctrl1_endexec -> SKIP
+
+-- assert CycleController_mod0_ctrl1 :[deadlock free[F]]
+-- assert CycleController_mod0_ctrl1 :[deterministic[F]]
+-- assert CycleController_mod0_ctrl1 :[divergence free]
+
+---------------------------------
+-- Memory for controller ctrl1 --
+---------------------------------
+-- This degenerates to STOP, because dvars and evars are empty. 
+MemoryComp_mod0_ctrl1 = set_mod0_ctrl1_c?x -> SKIP; STOP
+
+------------------------------------
+-- Behaviour for controller ctrl1 --
+------------------------------------
+ComposeMachines_mod0_ctrl1 =  
+  mod0_ctrl1_stm2[[registerRead.d1 <- registerReadC.d1,registerWrite.d2 <- registerWriteC.d2 | d1 <- RegisterDataInput,
+                                                                                               d2 <- RegisterDataOutput  ]]
+                 [[set_mod0_ctrl1_stm2_c <- set_mod0_ctrl1_c]]
+
+-- assert ComposeMachines_mod0_ctrl0 :[deadlock free[F]]
+-- assert ComposeMachines_mod0_ctrl0 :[deterministic[F]]
+-- assert ComposeMachines_mod0_ctrl0 :[divergence free]
+
+---------------------------
+-- Machine process: stm2 --
+---------------------------
+-- inputs = {mod0_ctrl1_stm2_x,mod0_ctrl1_stm2_ev1,mod0_ctrl1_stm2_ev2}
+-- outputs = {mod0_ctrl1_stm2_x,mod0_ctrl1_stm2_op1}
+
+-- declaring identifiers of transitions
+mod0_ctrl1_stm2_TIDSSim = {
+ 	"mod0_ctrl1_NULLTRANSITION",
+ 	"mod0_ctrl1_stm2_t0",
+ 	"mod0_ctrl1_stm2_s0_to_ds0",
+ 	"mod0_ctrl1_stm2_ds0_to_j0",
+ 	"mod0_ctrl1_stm2_j0_to_s0",
+ 	"mod0_ctrl1_stm2_j0_to_ds0"
+}
+
+channel mod0_ctrl1_stm2_endexec : mod0_ctrl1_stm2_TIDSSim
+
+-- We're assuming here that there are no time primitives in the example. 
+mod0_ctrl1_stm2 =  
+  prioritise(
+  -- For optimisation, the Behaviour and Memory processes take the constant as
+  -- a parameter, instead of communicating.  This is not how it is formalised in
+  -- the semantic rules. 
+    (((Cycle_mod0_ctrl1_stm2
+	[| {|registerRead,mod0_ctrl1_stm2_endexec,tock|} |] 
+    (set_mod0_ctrl1_stm2_c?mod0_ctrl1_stm2_c -> Memory_mod0_ctrl1_stm2(0,false,false,mod0_ctrl1_stm2_c)
+   	[| union({|mod0_ctrl1_stm2_WC|},mod0_ctrl1_stm2_WCsync) |] 
+ 	Clocks_mod0_ctrl1_stm2) \ {| mod0_ctrl1_stm2_WC |})
+ 	[| union( {| get_mod0_ctrl1_stm2_x,set_mod0_ctrl1_stm2_x,
+                       get_mod0_ctrl1_stm2_ev1,get_mod0_ctrl1_stm2_ev2,
+                       get_mod0_ctrl1_stm2_c,
+                       mod0_ctrl1_stm2_internalSim,
+                       mod0_ctrl1_stm2_clockReset, 
+                       startexec,
+                       mod0_ctrl1_stm2_endexec,registerWrite,
+                       end |}, mod0_ctrl1_stm2_WCsync ) |]              
+    Behaviour_mod0_ctrl1_stm2) 
+	\ {| get_mod0_ctrl1_stm2_x,set_mod0_ctrl1_stm2_x,
+         get_mod0_ctrl1_stm2_ev1,get_mod0_ctrl1_stm2_ev2,
+         get_mod0_ctrl1_stm2_c,
+         mod0_ctrl1_stm2_clockReset,
+         mod0_ctrl1_stm2_internalSim, 
+         mod0_ctrl1_stm2_enteredSim,
+         startexec |}             
+ 	) [|{end}|> SKIP
+   , <{},{tock}>)			
+
+assert mod0_ctrl1_stm2 :[deadlock free[F]]
+assert mod0_ctrl1_stm2 :[deterministic[F]]
+assert mod0_ctrl1_stm2 :[divergence free]
+
+------------------------------------------------------------------------
+-------------------- Cycle for Machine stm2 ----------------------------
+------------------------------------------------------------------------
+
+mod0_ctrl1_stm2_cycle = 1
+
+-- outputs = {mod0_ctrl1_stm2_x,mod0_ctrl1_stm2_op1}
+
+-- Projection of the data type of outputs that identifies the outputs 
+-- available without the values that can be output. 
+datatype COutputEventsOp_mod0_ctrl1_stm2 = 
+  Cmod0_ctrl1_stm2_x
+  | Cmod0_ctrl1_stm2_op1
+  
+-- inputs = {mod0_ctrl1_stm2_x,mod0_ctrl1_stm2_ev1,mod0_ctrl1_stm2_ev2}
+TakeInputs_mod0_ctrl1_stm2 = 
+  registerRead.imod0_ctrl1_stm2_x?mod0_ctrl1_stm2_xn -> SKIP 
+  |||
+  registerRead.imod0_ctrl1_stm2_ev1?mod0_ctrl1_stm2_ev1n -> SKIP 
+  |||
+  registerRead.imod0_ctrl1_stm2_ev2?mod0_ctrl1_stm2_ev2n -> SKIP 
+
+Cycle_mod0_ctrl1_stm2 = 
+  TakeInputs_mod0_ctrl1_stm2; 
+  startexec ->  
+  CollectOutputs_mod0_ctrl1_stm2(COutputEventsOp_mod0_ctrl1_stm2);
+  (wait(mod0_ctrl1_stm2_cycle) [] end -> SKIP); 
+  Cycle_mod0_ctrl1_stm2
+
+project_mod0_ctrl1_stm2(omod0_ctrl1_stm2_x.n) = Cmod0_ctrl1_stm2_x
+project_mod0_ctrl1_stm2(omod0_ctrl1_stm2_op1.n) = Cmod0_ctrl1_stm2_op1
+
+nametype OutputEventsOp_mod0_ctrl1_stm2 = {|
+  omod0_ctrl1_stm2_x,
+  omod0_ctrl1_stm2_op1 |}
+
+CollectOutputs_mod0_ctrl1_stm2(sout) = 
+  registerWrite?outp:{ outp | out <- sout, outp <- OutputEventsOp_mod0_ctrl1_stm2,project_mod0_ctrl1_stm2(outp) == out} -> 
+    CollectOutputs_mod0_ctrl1_stm2(diff(sout,{project_mod0_ctrl1_stm2(outp)}))
+  []
+  mod0_ctrl1_stm2_endexec?tid -> SKIP 
+
+-- assert Cycle_mod0_ctrl1_stm2 :[deadlock free[F]]
+-- assert Cycle_mod0_ctrl1_stm2 :[deterministic[F]]
+-- assert Cycle_mod0_ctrl1_stm2 :[divergence free]
+ 
+------------------------------------------------------------------------
+------------------- Memory for machine stm2 ----------------------------
+------------------------------------------------------------------------
+
+channel get_mod0_ctrl1_stm2_x, set_mod0_ctrl1_stm2_x: nat
+channel get_mod0_ctrl1_stm2_ev1, get_mod0_ctrl1_stm2_ev2: Bool
+channel get_mod0_ctrl1_stm2_c: nat
+channel mod0_ctrl1_stm2_internalSim: mod0_ctrl1_stm2_TIDSSim
+
+Memory_mod0_ctrl1_stm2(mod0_ctrl1_stm2_xn,mod0_ctrl1_stm2_ev1n,mod0_ctrl1_stm2_ev2n,mod0_ctrl1_stm2_c) =
+
+  get_mod0_ctrl1_stm2_x!mod0_ctrl1_stm2_xn ->
+    Memory_mod0_ctrl1_stm2(mod0_ctrl1_stm2_xn,mod0_ctrl1_stm2_ev1n,mod0_ctrl1_stm2_ev2n,mod0_ctrl1_stm2_c)
+  []
+  registerRead.imod0_ctrl1_stm2_x?mod0_ctrl1_stm2_xn -> 
+    Memory_mod0_ctrl1_stm2(mod0_ctrl1_stm2_xn,mod0_ctrl1_stm2_ev1n,mod0_ctrl1_stm2_ev2n,mod0_ctrl1_stm2_c)
+  []
+  set_mod0_ctrl1_stm2_x?mod0_ctrl1_stm2_xn -> 
+    Memory_mod0_ctrl1_stm2(mod0_ctrl1_stm2_xn,mod0_ctrl1_stm2_ev1n,mod0_ctrl1_stm2_ev2n,mod0_ctrl1_stm2_c)
+
+  []
+  get_mod0_ctrl1_stm2_ev1!mod0_ctrl1_stm2_ev1n ->
+    Memory_mod0_ctrl1_stm2(mod0_ctrl1_stm2_xn,mod0_ctrl1_stm2_ev1n,mod0_ctrl1_stm2_ev2n,mod0_ctrl1_stm2_c)
+  []
+  registerRead.imod0_ctrl1_stm2_ev1?mod0_ctrl1_stm2_ev1n -> 
+    Memory_mod0_ctrl1_stm2(mod0_ctrl1_stm2_xn,mod0_ctrl1_stm2_ev1n,mod0_ctrl1_stm2_ev2n,mod0_ctrl1_stm2_c)
+  []
+  get_mod0_ctrl1_stm2_ev2!mod0_ctrl1_stm2_ev2n ->
+    Memory_mod0_ctrl1_stm2(mod0_ctrl1_stm2_xn,mod0_ctrl1_stm2_ev1n,mod0_ctrl1_stm2_ev2n,mod0_ctrl1_stm2_c)
+  []
+  registerRead.imod0_ctrl1_stm2_ev2?mod0_ctrl1_stm2_ev2n -> 
+    Memory_mod0_ctrl1_stm2(mod0_ctrl1_stm2_xn,mod0_ctrl1_stm2_ev1n,mod0_ctrl1_stm2_ev2n,mod0_ctrl1_stm2_c)
+  
+  []
+  get_mod0_ctrl1_stm2_c!mod0_ctrl1_stm2_c ->
+    Memory_mod0_ctrl1_stm2(mod0_ctrl1_stm2_xn,mod0_ctrl1_stm2_ev1n,mod0_ctrl1_stm2_ev2n,mod0_ctrl1_stm2_c)
+  []
+  
+  mod0_ctrl1_stm2_internalSim!"mod0_ctrl1_stm2_t0" -> 
+    Memory_mod0_ctrl1_stm2(mod0_ctrl1_stm2_xn,mod0_ctrl1_stm2_ev1n,mod0_ctrl1_stm2_ev2n,mod0_ctrl1_stm2_c)
+  []
+  mod0_ctrl1_stm2_internalSim!"mod0_ctrl1_stm2_s0_to_ds0" -> 
+    Memory_mod0_ctrl1_stm2(mod0_ctrl1_stm2_xn,mod0_ctrl1_stm2_ev1n,mod0_ctrl1_stm2_ev2n,mod0_ctrl1_stm2_c)
+  []
+  mod0_ctrl1_stm2_endexec!"mod0_ctrl1_stm2_ds0_to_j0" -> 
+    Memory_mod0_ctrl1_stm2(mod0_ctrl1_stm2_xn,mod0_ctrl1_stm2_ev1n,mod0_ctrl1_stm2_ev2n,mod0_ctrl1_stm2_c)
+  []
+  (( (mod0_ctrl1_stm2_xn >= mod0_ctrl1_stm2_c and (mod0_ctrl1_stm2_ev1n or (mod0_ctrl1_stm2_ev2n and mod0_ctrl1_stm2_xn == 1))) )) &
+    (mod0_ctrl1_stm2_internalSim!"mod0_ctrl1_stm2_j0_to_s0" -> 
+      Memory_mod0_ctrl1_stm2(mod0_ctrl1_stm2_xn,mod0_ctrl1_stm2_ev1n,mod0_ctrl1_stm2_ev2n,mod0_ctrl1_stm2_c))
+  []
+  ((not( mod0_ctrl1_stm2_xn >= mod0_ctrl1_stm2_c and 
+         (mod0_ctrl1_stm2_ev1n or (mod0_ctrl1_stm2_ev2n and mod0_ctrl1_stm2_xn == 1))) )) &
+    (mod0_ctrl1_stm2_internalSim!"mod0_ctrl1_stm2_j0_to_ds0" -> 
+      Memory_mod0_ctrl1_stm2(mod0_ctrl1_stm2_xn,mod0_ctrl1_stm2_ev1n,mod0_ctrl1_stm2_ev2n,mod0_ctrl1_stm2_c))
+  
+------------------------------------------------------------------------
+------------------- Clocks for Machine stm2 ----------------------------
+------------------------------------------------------------------------
+-- declare clocks
+mod0_ctrl1_stm2_Clocks = { }
+
+channel mod0_ctrl1_stm2_clockReset -- no clocks declared
+ 						
+-- compile waiting conditions
+
+mod0_ctrl1_stm2_WC_enablerSet = {"dummy"}
+
+channel mod0_ctrl1_stm2_WC : mod0_ctrl1_stm2_WC_enablerSet.Bool
+
+mod0_ctrl1_stm2_WCset = {  }
+
+mod0_ctrl1_stm2_WCsync = {||}
+
+mod0_ctrl1_stm2_WCresets = {||}
+
+Timed(OneStep) {
+  WaitingConditionsSim_mod0_ctrl1_stm2 = 
+  || (alpha, P) : mod0_ctrl1_stm2_WCset @ [alpha] wbisim(P)
+}
+
+Clocks_mod0_ctrl1_stm2 = WaitingConditionsSim_mod0_ctrl1_stm2
+
+------------------------------------------------------------------------
+-------------------- Behaviour for Machine stm2-------------------------
+------------------------------------------------------------------------
+Behaviour_mod0_ctrl1_stm2 = 
+  startexec ->  
+  ((((CoreBehaviours_mod0_ctrl1_stm2) \ Enter_Exit_Exited_mod0_ctrl1_stm2) 
+    [|{mod0_ctrl1_stm2_Behaviour_terminate}|> SKIP) \ {end});  
+  Ending_mod0_ctrl1_stm2
+
+CoreBehaviours_mod0_ctrl1_stm2 = (I_mod0_ctrl1_stm2_i0Sim
+ [|{| mod0_ctrl1_stm2_enterSim.x.y,
+ 	  mod0_ctrl1_stm2_enteredSim.x.y,
+ 	  mod0_ctrl1_stm2_exitSim.x.y,
+ 	  mod0_ctrl1_stm2_exitedSim.x.y |
+ 		x <- diff(mod0_ctrl1_stm2_SIDSSim,{"mod0_ctrl1_stm2_s0","mod0_ctrl1_stm2_ds0"}),
+ 		y <- {"mod0_ctrl1_stm2_s0","mod0_ctrl1_stm2_ds0"}
+ |}|]
+ (S_mod0_ctrl1_stm2_s0_RSim
+   [|inter(CS_mod0_ctrl1_stm2_s0_syncSim,CS_mod0_ctrl1_stm2_ds0_syncSim)|]
+  S_mod0_ctrl1_stm2_ds0_RSim)
+   \mod0_ctrl1_stm2_internal_eventsSim 	)
+ 
+Ending_mod0_ctrl1_stm2 = 
+  mod0_ctrl1_stm2_endexec?tid -> (startexec -> Ending_mod0_ctrl1_stm2 [] end -> SKIP)   					
+ 	
+Enter_Exit_Exited_mod0_ctrl1_stm2 = 
+  {|mod0_ctrl1_stm2_enterVSim, mod0_ctrl1_stm2_exitVSim, mod0_ctrl1_stm2_exitedVSim |}
+
+channel mod0_ctrl1_stm2_enteredVSim, mod0_ctrl1_stm2_enterVSim, mod0_ctrl1_stm2_exitVSim, mod0_ctrl1_stm2_exitedVSim : mod0_ctrl1_stm2_SIDSSim
+channel mod0_ctrl1_stm2_enterSim, mod0_ctrl1_stm2_enteredSim: mod0_ctrl1_stm2_SIDSSim.mod0_ctrl1_stm2_SIDSSim
+channel mod0_ctrl1_stm2_exitSim,mod0_ctrl1_stm2_exitedSim: mod0_ctrl1_stm2_SIDSSim.mod0_ctrl1_stm2_SIDSSim
+
+channel mod0_ctrl1_stm2_Behaviour_terminate
+
+mod0_ctrl1_stm2_SIDSSim = {
+  "mod0_ctrl1_stm2",
+  "mod0_ctrl1_stm2_s0",
+  "mod0_ctrl1_stm2_ds0"
+}
+  
+mod0_ctrl1_stm2_internal_eventsSim = {|
+  mod0_ctrl1_stm2_enterSim,
+  mod0_ctrl1_stm2_enteredSim,
+  mod0_ctrl1_stm2_exitSim,
+  mod0_ctrl1_stm2_exitedSim |}
+  
+CS_mod0_ctrl1_stm2_s0_syncSim = {|
+  mod0_ctrl1_stm2_enterSim.y.x, 
+  mod0_ctrl1_stm2_enteredSim.y.x, 
+  mod0_ctrl1_stm2_exitSim.y.x, 
+  mod0_ctrl1_stm2_exitedSim.y.x,
+  mod0_ctrl1_stm2_enterSim.x.y, 
+  mod0_ctrl1_stm2_enteredSim.x.y, 
+  mod0_ctrl1_stm2_exitSim.x.y, 
+  mod0_ctrl1_stm2_exitedSim.x.y |
+  x <- {"mod0_ctrl1_stm2_s0","mod0_ctrl1_stm2_ds0"},
+  y <- {"mod0_ctrl1_stm2_s0"}
+|}
+ 
+mod0_ctrl1_stm2_s0_triggersSim = {|
+  mod0_ctrl1_stm2_internalSim."mod0_ctrl1_stm2_j0_to_ds0",
+  mod0_ctrl1_stm2_endexec."mod0_ctrl1_stm2_ds0_to_j0",
+  mod0_ctrl1_stm2_internalSim."mod0_ctrl1_stm2_s0_to_ds0",
+  mod0_ctrl1_stm2_internalSim."mod0_ctrl1_stm2_j0_to_s0"
+|}
+ 		   
+S_mod0_ctrl1_stm2_s0Sim = let
+  T_mod0_ctrl1_stm2_s0_to_ds0Sim = 
+    mod0_ctrl1_stm2_internalSim!"mod0_ctrl1_stm2_s0_to_ds0" ->  
+    mod0_ctrl1_stm2_exitSim!"mod0_ctrl1_stm2_s0"!"mod0_ctrl1_stm2_s0" -> SKIP;
+ 	SKIP;
+    mod0_ctrl1_stm2_exitedSim!"mod0_ctrl1_stm2_s0"!"mod0_ctrl1_stm2_s0" -> SKIP;
+ 	mod0_ctrl1_stm2_enterSim!"mod0_ctrl1_stm2_s0"!"mod0_ctrl1_stm2_ds0" -> 
+    mod0_ctrl1_stm2_enteredSim!"mod0_ctrl1_stm2_s0"!"mod0_ctrl1_stm2_ds0" ->
+ 	S_mod0_ctrl1_stm2_s0Sim
+ 
+  S_mod0_ctrl1_stm2_s0_execute(o) = 
+ 	mod0_ctrl1_stm2_enteredSim!o!"mod0_ctrl1_stm2_s0" ->
+ 	  (SKIP; STOP /\ (
+ 	     T_mod0_ctrl1_stm2_s0_to_ds0Sim
+ 	   	 []
+ 	   	 mod0_ctrl1_stm2_internalSim?x:diff(mod0_ctrl1_stm2_TIDSSim,{"NULLTRANSITION","mod0_ctrl1_stm2_j0_to_ds0","mod0_ctrl1_stm2_ds0_to_j0","mod0_ctrl1_stm2_s0_to_ds0","mod0_ctrl1_stm2_j0_to_s0"}) ->
+ 	   	 mod0_ctrl1_stm2_exitSim?y:diff(mod0_ctrl1_stm2_SIDSSim,{"mod0_ctrl1_stm2_s0"})!"mod0_ctrl1_stm2_s0" -> (
+ 	   	 SKIP;
+ 	   	 mod0_ctrl1_stm2_exitedSim!y!"mod0_ctrl1_stm2_s0" -> SKIP);
+ 	   	 S_mod0_ctrl1_stm2_s0Sim))
+within
+  mod0_ctrl1_stm2_enterSim?x:diff(mod0_ctrl1_stm2_SIDSSim,{"mod0_ctrl1_stm2_s0"})!"mod0_ctrl1_stm2_s0" -> ( 
+ 	S_mod0_ctrl1_stm2_s0_execute(x)) 
+
+CS_mod0_ctrl1_stm2_ds0_syncSim = {|
+  mod0_ctrl1_stm2_enterSim.y.x, 
+  mod0_ctrl1_stm2_enteredSim.y.x, 
+  mod0_ctrl1_stm2_exitSim.y.x, 
+  mod0_ctrl1_stm2_exitedSim.y.x,
+  mod0_ctrl1_stm2_enterSim.x.y, 
+  mod0_ctrl1_stm2_enteredSim.x.y, 
+  mod0_ctrl1_stm2_exitSim.x.y, 
+  mod0_ctrl1_stm2_exitedSim.x.y |
+  x <- {"mod0_ctrl1_stm2_s0","mod0_ctrl1_stm2_ds0"},
+  y <- {"mod0_ctrl1_stm2_ds0"}
+|}
+ 
+mod0_ctrl1_stm2_ds0_triggersSim = {|
+  mod0_ctrl1_stm2_internalSim."mod0_ctrl1_stm2_j0_to_ds0",
+  mod0_ctrl1_stm2_endexec."mod0_ctrl1_stm2_ds0_to_j0",
+  mod0_ctrl1_stm2_internalSim."mod0_ctrl1_stm2_j0_to_s0",
+  mod0_ctrl1_stm2_internalSim."mod0_ctrl1_stm2_s0_to_ds0"
+|}
+ 		   
+S_mod0_ctrl1_stm2_ds0Sim = let
+  T_mod0_ctrl1_stm2_ds0_to_j0Sim = 
+    mod0_ctrl1_stm2_endexec!"mod0_ctrl1_stm2_ds0_to_j0" -> 
+    startexec ->  
+    mod0_ctrl1_stm2_exitSim!"mod0_ctrl1_stm2_ds0"!"mod0_ctrl1_stm2_ds0" -> SKIP;
+ 	SKIP;
+    mod0_ctrl1_stm2_exitedSim!"mod0_ctrl1_stm2_ds0"!"mod0_ctrl1_stm2_ds0" -> SKIP;
+ 	get_mod0_ctrl1_stm2_x?x -> (
+ 	(mod0_ctrl1_stm2_internalSim!"mod0_ctrl1_stm2_j0_to_s0" -> 
+     registerWrite.omod0_ctrl1_stm2_op1.1 -> SKIP;
+     mod0_ctrl1_stm2_enterSim!"mod0_ctrl1_stm2_ds0"!"mod0_ctrl1_stm2_s0" -> 
+     mod0_ctrl1_stm2_enteredSim!"mod0_ctrl1_stm2_ds0"!"mod0_ctrl1_stm2_s0" ->
+ 	 S_mod0_ctrl1_stm2_ds0Sim)
+    []
+ 	(mod0_ctrl1_stm2_internalSim!"mod0_ctrl1_stm2_j0_to_ds0" -> 
+     mod0_ctrl1_stm2_enterSim!"mod0_ctrl1_stm2_ds0"!"mod0_ctrl1_stm2_ds0" -> 
+     S_mod0_ctrl1_stm2_ds0_execute("mod0_ctrl1_stm2_ds0")))
+ 	
+  S_mod0_ctrl1_stm2_ds0_execute(o) = 
+ 	SKIP; 
+ 	mod0_ctrl1_stm2_enteredSim!o!"mod0_ctrl1_stm2_ds0" ->
+ 	  (SKIP; STOP /\ (
+ 	   	 T_mod0_ctrl1_stm2_ds0_to_j0Sim
+ 	   	 []
+ 	   	 mod0_ctrl1_stm2_internalSim?x:diff(mod0_ctrl1_stm2_TIDSSim,{"NULLTRANSITION","mod0_ctrl1_stm2_j0_to_ds0","mod0_ctrl1_stm2_ds0_to_j0","mod0_ctrl1_stm2_j0_to_s0","mod0_ctrl1_stm2_s0_to_ds0"}) ->
+ 	   	 mod0_ctrl1_stm2_exitSim?y:diff(mod0_ctrl1_stm2_SIDSSim,{"mod0_ctrl1_stm2_ds0"})!"mod0_ctrl1_stm2_ds0" -> 
+         (SKIP;
+ 	   	  mod0_ctrl1_stm2_exitedSim!y!"mod0_ctrl1_stm2_ds0" -> SKIP);
+ 	   	  S_mod0_ctrl1_stm2_ds0Sim))
+within
+  mod0_ctrl1_stm2_enterSim?x:diff(mod0_ctrl1_stm2_SIDSSim,{"mod0_ctrl1_stm2_ds0"})!"mod0_ctrl1_stm2_ds0" -> ( 
+ 	S_mod0_ctrl1_stm2_ds0_execute(x)) 
+  						
+I_mod0_ctrl1_stm2_i0Sim = T_mod0_ctrl1_stm2_t0Sim
+  						
+mod0_ctrl1_stm2_int_intSim = {|
+  mod0_ctrl1_stm2_endexec."mod0_ctrl1_stm2_t0",
+  mod0_ctrl1_stm2_internalSim."mod0_ctrl1_stm2_t0",
+  mod0_ctrl1_stm2_endexec."mod0_ctrl1_stm2_s0_to_ds0",
+  mod0_ctrl1_stm2_internalSim."mod0_ctrl1_stm2_s0_to_ds0",
+  mod0_ctrl1_stm2_endexec."mod0_ctrl1_stm2_ds0_to_j0",
+  mod0_ctrl1_stm2_internalSim."mod0_ctrl1_stm2_ds0_to_j0",
+  mod0_ctrl1_stm2_endexec."mod0_ctrl1_stm2_j0_to_s0",
+  mod0_ctrl1_stm2_internalSim."mod0_ctrl1_stm2_j0_to_s0",
+  mod0_ctrl1_stm2_endexec."mod0_ctrl1_stm2_j0_to_ds0",
+  mod0_ctrl1_stm2_internalSim."mod0_ctrl1_stm2_j0_to_ds0"
+|}
+  
+T_mod0_ctrl1_stm2_t0Sim	= 
+  mod0_ctrl1_stm2_internalSim!"mod0_ctrl1_stm2_t0" -> 
+  mod0_ctrl1_stm2_enterSim!"mod0_ctrl1_stm2"!"mod0_ctrl1_stm2_s0" -> 
+  mod0_ctrl1_stm2_enteredSim!"mod0_ctrl1_stm2"!"mod0_ctrl1_stm2_s0" ->
+  SKIP
+  
+S_mod0_ctrl1_stm2_s0_RSim = 
+  S_mod0_ctrl1_stm2_s0Sim
+    [|diff(mod0_ctrl1_stm2_int_intSim,mod0_ctrl1_stm2_s0_triggersSim)|]
+  SKIP
+   		
+S_mod0_ctrl1_stm2_ds0_RSim = 
+  S_mod0_ctrl1_stm2_ds0Sim
+   	[|diff(mod0_ctrl1_stm2_int_intSim,mod0_ctrl1_stm2_ds0_triggersSim)|]
+  SKIP
+   		
+
